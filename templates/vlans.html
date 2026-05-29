@@ -1,0 +1,477 @@
+{% extends "base.html" %}
+{% block title %}VLAN{% endblock %}
+
+{% block page_title %}
+<div class="page-title">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h2a2 2 0 0 1 2 2v2M6 3H4a2 2 0 0 0-2 2v2"/></svg>
+  VLAN
+</div>
+{% endblock %}
+
+{% block header_actions %}
+<button class="btn btn-secondary btn-sm" onclick="toggleAll(true)">
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+  Espandi tutto
+</button>
+<button class="btn btn-secondary btn-sm" onclick="toggleAll(false)">
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+  Comprimi tutto
+</button>
+<button class="btn btn-primary btn-sm" onclick="openModal('modalAddVlan')">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  Aggiungi VLAN
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h2a2 2 0 0 1 2 2v2M6 3H4a2 2 0 0 0-2 2v2"/></svg>
+      VLAN Configurate ({{ vlans|length }})
+    </div>
+    <div class="search-wrap">
+      <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" class="search-input" id="vlanSearch" placeholder="Cerca per ID, nome o descrizione..." oninput="filterVlans(this.value)">
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="vlanTable">
+      <thead>
+        <tr>
+          <th style="width:32px"></th>
+          <th class="sortable" onclick="sortVlans('vlan_id')">
+            VLAN ID <svg class="sort-icon" id="si-vlan_id" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" opacity=".3"/><polyline points="18 15 12 9 6 15" opacity=".3"/></svg>
+          </th>
+          <th class="sortable" onclick="sortVlans('name')">
+            Nome <svg class="sort-icon" id="si-name" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" opacity=".3"/><polyline points="18 15 12 9 6 15" opacity=".3"/></svg>
+          </th>
+          <th class="sortable" onclick="sortVlans('desc')">
+            Descrizione <svg class="sort-icon" id="si-desc" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" opacity=".3"/><polyline points="18 15 12 9 6 15" opacity=".3"/></svg>
+          </th>
+          <th>Subnet</th>
+          <th>Stato</th>
+          <th>Creata il</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for vlan in vlans %}
+        {% set subnets = vlan_subnets.get(vlan.vlan_id, []) %}
+        <!-- VLAN row -->
+        <tr class="vlan-row" data-vlan-id="{{ vlan.vlan_id }}"
+            data-vid="{{ vlan.vlan_id }}"
+            data-name="{{ vlan.name|lower }}"
+            data-desc="{{ (vlan.description or '')|lower }}"
+            data-search="{{ vlan.vlan_id }} {{ vlan.name|lower }} {{ (vlan.description or '')|lower }}">
+          <td>
+            {% if subnets %}
+            <button class="tog-btn" onclick="toggleVlan({{ vlan.vlan_id }})" title="Espandi/Comprimi">
+              <svg id="tog-icon-{{ vlan.vlan_id }}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            {% else %}
+            <span style="display:inline-block;width:20px"></span>
+            {% endif %}
+          </td>
+          <td><span class="vlan-tag" style="font-size:13px;padding:3px 10px">{{ vlan.vlan_id }}</span></td>
+          <td style="font-weight:500">{{ vlan.name }}</td>
+          <td style="font-size:12px;color:var(--text-secondary)">{{ vlan.description or '—' }}</td>
+          <td>
+            {% if subnets %}
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-muted)">
+              {{ subnets|length }} subnet
+            </span>
+            {% else %}
+            <span style="color:var(--text-muted);font-size:11px">—</span>
+            {% endif %}
+          </td>
+          <td><span class="badge badge-{{ vlan.status }}">{{ vlan.status }}</span></td>
+          <td style="font-size:11px;color:var(--text-muted)">{{ vlan.created_at.strftime('%d/%m/%Y') }}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-secondary btn-sm btn-icon" style="margin-right:2px"
+              data-id="{{ vlan.id }}"
+              data-vid="{{ vlan.vlan_id }}"
+              data-name="{{ vlan.name|e }}"
+              data-desc="{{ (vlan.description or '')|e }}"
+              data-status="{{ vlan.status }}"
+              onclick="openEditVlanBtn(this)"
+              title="Modifica">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="btn btn-danger btn-sm btn-icon"
+              onclick="deleteVlan({{ vlan.id }}, {{ vlan.vlan_id }})" title="Elimina">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            </button>
+          </td>
+        </tr>
+        <!-- Subnet rows (collassate) -->
+        {% for net in subnets %}
+        <tr class="subnet-row subnet-of-{{ vlan.vlan_id }}" style="display:none"
+            data-search="{{ net.address }}/{{ net.cidr }} {{ net.name|lower }} {{ (net.location or '')|lower }}">
+          <td></td>
+          <td colspan="2">
+            <div style="display:flex;align-items:center;gap:.5rem;padding-left:1rem">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
+              <a href="{{ url_for('network_detail', net_id=net.id) }}"
+                 style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-primary)">
+                {{ net.address }}/{{ net.cidr }}
+              </a>
+            </div>
+          </td>
+          <td style="font-size:12px;color:var(--text-secondary)">
+            {{ net.name }}{% if net.location %} <span style="color:var(--text-muted)">· {{ net.location }}</span>{% endif %}
+          </td>
+          <td>
+            <div class="usage-bar-wrap" style="min-width:80px">
+              <div class="usage-bar">
+                {% set up = net.usage_percent %}
+                <div class="usage-fill {% if up < 50 %}usage-low{% elif up < 75 %}usage-med{% elif up < 90 %}usage-high{% else %}usage-crit{% endif %}"
+                     style="width:{{ up }}%"></div>
+              </div>
+              <span class="usage-pct">{{ up }}%</span>
+            </div>
+          </td>
+          <td><span class="badge badge-{{ net.status }}">{{ net.status }}</span></td>
+          <td colspan="2" style="font-size:11px;color:var(--text-muted)">
+            {{ net.used_count }} usati / {{ net.available_count }} liberi
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr><td colspan="8">
+          <div class="empty-state">
+            <div class="empty-title">Nessuna VLAN configurata</div>
+            <div class="empty-sub">Aggiungi la prima VLAN</div>
+          </div>
+        </td></tr>
+        {% endfor %}
+
+        <!-- Subnet senza VLAN -->
+        {% if no_vlan_subnets %}
+        <tr class="vlan-row" data-vlan-id="0" data-search="senza vlan non assegnate">
+          <td>
+            <button class="tog-btn" onclick="toggleVlan(0)" title="Espandi/Comprimi">
+              <svg id="tog-icon-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </td>
+          <td><span class="vlan-tag" style="font-size:13px;padding:3px 10px;background:var(--bg-elevated);color:var(--text-muted)">—</span></td>
+          <td style="font-weight:500;color:var(--text-muted)">Senza VLAN</td>
+          <td style="font-size:12px;color:var(--text-muted)">Subnet senza VLAN assegnata</td>
+          <td><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-muted)">{{ no_vlan_subnets|length }} subnet</span></td>
+          <td>—</td>
+          <td>—</td>
+          <td></td>
+        </tr>
+        {% for net in no_vlan_subnets %}
+        <tr class="subnet-row subnet-of-0" style="display:none"
+            data-search="{{ net.address }}/{{ net.cidr }} {{ net.name|lower }}">
+          <td></td>
+          <td colspan="2">
+            <div style="display:flex;align-items:center;gap:.5rem;padding-left:1rem">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
+              <a href="{{ url_for('network_detail', net_id=net.id) }}"
+                 style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-primary)">
+                {{ net.address }}/{{ net.cidr }}
+              </a>
+            </div>
+          </td>
+          <td style="font-size:12px;color:var(--text-secondary)">{{ net.name }}</td>
+          <td>
+            <div class="usage-bar-wrap" style="min-width:80px">
+              <div class="usage-bar">
+                {% set up = net.usage_percent %}
+                <div class="usage-fill {% if up < 50 %}usage-low{% elif up < 75 %}usage-med{% elif up < 90 %}usage-high{% else %}usage-crit{% endif %}"
+                     style="width:{{ up }}%"></div>
+              </div>
+              <span class="usage-pct">{{ up }}%</span>
+            </div>
+          </td>
+          <td><span class="badge badge-{{ net.status }}">{{ net.status }}</span></td>
+          <td colspan="2" style="font-size:11px;color:var(--text-muted)">
+            {{ net.used_count }} usati / {{ net.available_count }} liberi
+          </td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal Add VLAN -->
+<div class="modal-overlay" id="modalAddVlan">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Aggiungi VLAN</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalAddVlan">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">VLAN ID * (1–4094)</label>
+          <input id="vlanId" class="form-control" type="number" min="1" max="4094" placeholder="100" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nome *</label>
+          <input id="vlanName" class="form-control" placeholder="Management" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrizione</label>
+        <input id="vlanDesc" class="form-control" placeholder="Opzionale">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalAddVlan">Annulla</button>
+      <button class="btn btn-primary" onclick="submitAddVlan()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Edit VLAN -->
+<div class="modal-overlay" id="modalEditVlan">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Modifica VLAN</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalEditVlan">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editVlanId">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">VLAN ID</label>
+          <input id="editVlanVid" class="form-control" readonly style="opacity:.6">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nome *</label>
+          <input id="editVlanName" class="form-control">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrizione</label>
+        <input id="editVlanDesc" class="form-control">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Stato</label>
+        <select id="editVlanStatus" class="form-control filter-select" style="width:100%">
+          <option value="active">active</option>
+          <option value="reserved">reserved</option>
+          <option value="deprecated">deprecated</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalEditVlan">Annulla</button>
+      <button class="btn btn-primary" onclick="submitEditVlan()">Salva</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Toggle espandi/comprimi ──────────────────────────────────────
+function toggleVlan(vid) {
+  var rows = document.querySelectorAll('.subnet-of-' + vid);
+  var icon = document.getElementById('tog-icon-' + vid);
+  var open = rows.length > 0 && rows[0].style.display !== 'none';
+  rows.forEach(function(r){ r.style.display = open ? 'none' : ''; });
+  if (icon) {
+    icon.setAttribute('points', open
+      ? '9 18 15 12 9 6'      // freccia destra = chiuso
+      : '6 9 12 15 18 9');    // freccia giu = aperto
+    // Usa polilinea corretta
+    icon.innerHTML = open
+      ? '<polyline points="9 18 15 12 9 6"/>'
+      : '<polyline points="6 9 12 15 18 9"/>';
+  }
+}
+
+function toggleAll(expand) {
+  document.querySelectorAll('.vlan-row').forEach(function(row) {
+    var vid = row.getAttribute('data-vlan-id');
+    var rows = document.querySelectorAll('.subnet-of-' + vid);
+    var icon = document.getElementById('tog-icon-' + vid);
+    if (!rows.length) return;
+    rows.forEach(function(r){ r.style.display = expand ? '' : 'none'; });
+    if (icon) icon.innerHTML = expand
+      ? '<polyline points="6 9 12 15 18 9"/>'
+      : '<polyline points="9 18 15 12 9 6"/>';
+  });
+}
+
+// ── Ricerca su ID, nome, descrizione ────────────────────────────
+function filterVlans(q) {
+  q = q.toLowerCase().trim();
+  document.querySelectorAll('.vlan-row').forEach(function(row) {
+    var vid  = (row.getAttribute('data-vid')  || '').toLowerCase();
+    var name = (row.getAttribute('data-name') || '').toLowerCase();
+    var desc = (row.getAttribute('data-desc') || '').toLowerCase();
+    var vlanMatch = !q || vid.includes(q) || name.includes(q) || desc.includes(q);
+
+    var vlanId  = row.getAttribute('data-vlan-id');
+    var subRows = document.querySelectorAll('.subnet-of-' + vlanId);
+    var subMatch = false;
+    subRows.forEach(function(sr) {
+      var m = !q || sr.getAttribute('data-search').includes(q);
+      if (m) subMatch = true;
+      sr.style.display = (m && q) ? '' : 'none';
+    });
+    row.style.display = (vlanMatch || subMatch) ? '' : 'none';
+    if (subMatch && q) {
+      subRows.forEach(function(r){ r.style.display = ''; });
+      var icon = document.getElementById('tog-icon-' + vlanId);
+      if (icon) icon.innerHTML = '<polyline points="6 9 12 15 18 9"/>';
+    }
+  });
+}
+
+// ── Ordinamento colonne ──────────────────────────────────────────
+var _sortField = null;
+var _sortDir   = 'asc';
+
+function sortVlans(field) {
+  if (_sortField === field) {
+    _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _sortField = field;
+    _sortDir   = 'asc';
+  }
+
+  // Aggiorna icone
+  ['vlan_id','name','desc'].forEach(function(f) {
+    var icon = document.getElementById('si-' + f);
+    if (!icon) return;
+    if (f === field) {
+      icon.innerHTML = _sortDir === 'asc'
+        ? '<polyline points="6 9 12 15 18 9"/>'
+        : '<polyline points="18 15 12 9 6 15"/>';
+      icon.style.opacity = '1';
+      icon.style.color   = 'var(--accent)';
+    } else {
+      icon.innerHTML = '<polyline points="6 9 12 15 18 9" opacity=".3"/><polyline points="18 15 12 9 6 15" opacity=".3"/>';
+      icon.style.opacity = '.4';
+      icon.style.color   = '';
+    }
+  });
+
+  // Raccoglie coppie [vlan-row + relative subnet-rows]
+  var tbody  = document.querySelector('#vlanTable tbody');
+  var groups = [];
+  var rows   = Array.from(tbody.querySelectorAll('tr'));
+  var i = 0;
+  while (i < rows.length) {
+    var row = rows[i];
+    if (row.classList.contains('vlan-row')) {
+      var vid      = row.getAttribute('data-vlan-id');
+      var children = [];
+      var j = i + 1;
+      while (j < rows.length && rows[j].classList.contains('subnet-row')) {
+        children.push(rows[j]);
+        j++;
+      }
+      groups.push({ row: row, children: children, vid: vid });
+      i = j;
+    } else {
+      i++;
+    }
+  }
+
+  // Ordina i gruppi
+  groups.sort(function(a, b) {
+    var va, vb;
+    if (field === 'vlan_id') {
+      va = parseInt(a.row.getAttribute('data-vid'))  || 0;
+      vb = parseInt(b.row.getAttribute('data-vid'))  || 0;
+    } else if (field === 'name') {
+      va = a.row.getAttribute('data-name') || '';
+      vb = b.row.getAttribute('data-name') || '';
+    } else {
+      va = a.row.getAttribute('data-desc') || '';
+      vb = b.row.getAttribute('data-desc') || '';
+    }
+    if (va < vb) return _sortDir === 'asc' ? -1 :  1;
+    if (va > vb) return _sortDir === 'asc' ?  1 : -1;
+    return 0;
+  });
+
+  // Reinserisci righe ordinate
+  groups.forEach(function(g) {
+    tbody.appendChild(g.row);
+    g.children.forEach(function(c){ tbody.appendChild(c); });
+  });
+}
+
+// ── Edit VLAN ────────────────────────────────────────────────────
+function openEditVlanBtn(btn) {
+  openEditVlan(
+    btn.getAttribute('data-id'),
+    btn.getAttribute('data-vid'),
+    btn.getAttribute('data-name'),
+    btn.getAttribute('data-desc'),
+    btn.getAttribute('data-status')
+  );
+}
+
+function openEditVlan(id, vid, name, desc, status) {
+  document.getElementById('editVlanId').value     = id;
+  document.getElementById('editVlanVid').value    = vid;
+  document.getElementById('editVlanName').value   = name   || '';
+  document.getElementById('editVlanDesc').value   = desc   || '';
+  document.getElementById('editVlanStatus').value = status || 'active';
+  openModal('modalEditVlan');
+}
+
+async function submitEditVlan() {
+  var id = document.getElementById('editVlanId').value;
+  var payload = {
+    name:        document.getElementById('editVlanName').value.trim(),
+    description: document.getElementById('editVlanDesc').value.trim(),
+    status:      document.getElementById('editVlanStatus').value,
+  };
+  if (!payload.name) { showToast('Il nome e\' obbligatorio', 'error'); return; }
+  await apiFetch('/ipam/api/vlans/' + id, { method: 'PUT', body: JSON.stringify(payload) });
+  showToast('VLAN aggiornata', 'success');
+  closeModal('modalEditVlan');
+  setTimeout(function(){ window.location.reload(); }, 600);
+}
+
+// ── Add VLAN ─────────────────────────────────────────────────────
+async function submitAddVlan() {
+  var payload = {
+    vlan_id:     parseInt(document.getElementById('vlanId').value),
+    name:        document.getElementById('vlanName').value.trim(),
+    description: document.getElementById('vlanDesc').value.trim(),
+  };
+  if (!payload.vlan_id || !payload.name) { showToast('Compila tutti i campi', 'error'); return; }
+  await apiFetch('/ipam/api/vlans', { method:'POST', body: JSON.stringify(payload) });
+  showToast('VLAN aggiunta', 'success');
+  closeModal('modalAddVlan');
+  setTimeout(function(){ window.location.reload(); }, 800);
+}
+
+// ── Delete VLAN ──────────────────────────────────────────────────
+async function deleteVlan(id, vid) {
+  if (!confirm('Eliminare VLAN ' + vid + '?')) return;
+  await apiFetch('/ipam/api/vlans/' + id, { method:'DELETE' });
+  showToast('VLAN eliminata', 'success');
+  setTimeout(function(){ window.location.reload(); }, 600);
+}
+</script>
+
+<style>
+.tog-btn {
+  background:none; border:none; cursor:pointer;
+  color:var(--text-muted); padding:2px 4px;
+  border-radius:var(--radius-sm);
+  display:inline-flex; align-items:center;
+  transition:color var(--transition);
+}
+.tog-btn:hover { color:var(--accent); }
+.vlan-row td { background:var(--bg-card); }
+.subnet-row td { background:var(--bg-base); border-left:2px solid var(--accent-glow); }
+.subnet-row:hover td { background:var(--bg-hover); }
+</style>
+{% endblock %}

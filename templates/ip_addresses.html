@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% block title %}Indirizzi IP{% endblock %}
+
+{% block page_title %}
+<div class="page-title">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>
+  Indirizzi IP
+</div>
+{% endblock %}
+
+{% block header_actions %}
+<button class="btn btn-primary btn-sm" onclick="openModal('modalAddIP')">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  Aggiungi IP
+</button>
+{% endblock %}
+
+{% block content %}
+
+<form method="GET" action="{{ url_for('ip_addresses') }}" id="filterForm">
+  <input type="hidden" name="sort" value="{{ sort_by }}">
+  <input type="hidden" name="dir"  value="{{ sort_dir }}">
+
+  <div class="filters-bar">
+    <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input name="q" class="search-input" value="{{ search }}" placeholder="IP, hostname, MAC…">
+    </div>
+
+    <span class="filter-label">Stato</span>
+    <select name="status" class="filter-select" onchange="this.form.submit()">
+      <option value="">Tutti</option>
+      <option value="used"      {% if status=='used'      %}selected{% endif %}>In uso</option>
+      <option value="reserved"  {% if status=='reserved'  %}selected{% endif %}>Riservato</option>
+      <option value="dhcp"      {% if status=='dhcp'      %}selected{% endif %}>DHCP</option>
+      <option value="available" {% if status=='available' %}selected{% endif %}>Disponibile</option>
+    </select>
+
+    {% if device_types %}
+    <span class="filter-label">Tipo</span>
+    <select name="device_type" class="filter-select" onchange="this.form.submit()">
+      <option value="">Tutti</option>
+      {% for dt in device_types %}
+      <option value="{{ dt }}" {% if device_type==dt %}selected{% endif %}>{{ dt }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+
+    {% if os_types %}
+    <span class="filter-label">OS</span>
+    <select name="os_type" class="filter-select" onchange="this.form.submit()">
+      <option value="">Tutti</option>
+      {% for ot in os_types %}
+      <option value="{{ ot }}" {% if os_type==ot %}selected{% endif %}>{{ ot }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+
+    <span class="filter-label">Switch</span>
+    <input name="switch_name" class="search-input" style="width:120px" value="{{ switch_name }}" placeholder="es. sw-core-01">
+
+    <span class="filter-label">Rete</span>
+    <input name="network_q" class="search-input" style="width:110px" value="{{ network_q }}" placeholder="es. 10.0.0">
+
+    <button type="submit" class="btn btn-secondary btn-sm">Cerca</button>
+    {% if search or status or device_type or os_type or switch_name or network_q %}
+    <a href="{{ url_for('ip_addresses') }}" class="btn btn-secondary btn-sm">✕ Reset</a>
+    {% endif %}
+    <div class="result-count">{{ pagination.total }} indirizzi</div>
+  </div>
+</form>
+
+<div class="card" style="margin-top:0;border-radius:0 0 var(--radius-lg) var(--radius-lg)">
+  <div class="table-wrap">
+    <table id="ipTable">
+      <thead>
+        <tr>
+          {% macro sort_th(field, label, extra_style='') %}
+          <th class="sortable {% if sort_by == field %}sort-{{ sort_dir }}{% endif %}"
+              style="{{ extra_style }}"
+              onclick="sortBy('{{ field }}')">
+            {{ label }}
+            <svg class="sort-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              {% if sort_by == field and sort_dir == 'asc' %}
+              <polyline points="18 15 12 9 6 15"/>
+              {% elif sort_by == field and sort_dir == 'desc' %}
+              <polyline points="6 9 12 15 18 9"/>
+              {% else %}
+              <polyline points="6 9 12 15 18 9"/><polyline points="18 15 12 9 6 15" opacity=".3"/>
+              {% endif %}
+            </svg>
+          </th>
+          {% endmacro %}
+          {{ sort_th('ip_address',  'Indirizzo IP') }}
+          {{ sort_th('hostname',    'Hostname') }}
+          {{ sort_th('mac_address', 'MAC Address') }}
+          {{ sort_th('switch_name', 'Switch') }}
+          {{ sort_th('switch_port', 'Porta') }}
+          {{ sort_th('device_type', 'Tipo Dispositivo') }}
+          {{ sort_th('os_type',     'OS') }}
+          {{ sort_th('network',     'Rete') }}
+          {{ sort_th('status',      'Stato') }}
+          {{ sort_th('last_seen',   'Ultimo Rilevato') }}
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ip in ip_records %}
+        <tr>
+          <td class="col-mono" style="font-weight:500">{{ ip.ip_address }}</td>
+          <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ip.hostname or '—' }}</td>
+          <td class="col-mono" style="font-size:11px;color:var(--text-muted)">{{ ip.mac_address or '—' }}</td>
+          <td style="font-size:11px;color:var(--text-muted)" title="{{ ip.switch_name or '' }}">{{ ip.switch_name or '—' }}</td>
+          <td style="font-size:11px;color:var(--text-muted);font-family:'IBM Plex Mono',monospace">{{ ip.switch_port or '—' }}</td>
+          <td style="font-size:12px">
+            {% if ip.device_type %}<span style="color:var(--text-secondary)">{{ ip.device_type }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td style="font-size:11px;color:var(--text-muted)">{{ ip.os_type or '—' }}</td>
+          <td style="font-size:12px">
+            {% if ip.network %}
+            <a href="{{ url_for('network_detail', net_id=ip.network_id) }}" style="color:var(--accent);font-size:11px;font-family:'IBM Plex Mono',monospace">
+              {{ ip.network.address }}/{{ ip.network.cidr }}
+            </a>
+            {% else %}—{% endif %}
+          </td>
+          <td><span class="badge badge-{{ ip.status }}">{{ ip.status }}</span></td>
+          <td style="font-size:11px;color:var(--text-muted)">
+            {{ ip.last_seen.strftime('%d/%m/%Y %H:%M') if ip.last_seen else '—' }}
+          </td>
+          <td>
+            <button class="btn btn-danger btn-sm btn-icon" onclick='deleteIP({{ ip.id }}, {{ ip.ip_address|tojson }})'>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="11">
+          <div class="empty-state">
+            <div class="empty-title">Nessun indirizzo trovato</div>
+            <div class="empty-sub">Modifica i criteri di ricerca o aggiungi un nuovo IP</div>
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pagination.pages > 1 %}
+  {% set pp = 'q='~search~'&status='~status~'&device_type='~device_type~'&os_type='~os_type~'&switch_name='~switch_name~'&network_q='~network_q~'&sort='~sort_by~'&dir='~sort_dir %}
+  <div class="pagination">
+    <div class="page-info">{{ (pagination.page-1)*50+1 }}–{{ [pagination.page*50, pagination.total]|min }} di {{ pagination.total }}</div>
+    <div class="page-links">
+      <a href="?page={{ pagination.prev_num }}&{{ pp }}" class="page-link {% if not pagination.has_prev %}disabled{% endif %}">‹</a>
+      {% for p in pagination.iter_pages(left_edge=1,right_edge=1,left_current=2,right_current=2) %}
+        {% if p %}<a href="?page={{ p }}&{{ pp }}" class="page-link {% if p==pagination.page %}active{% endif %}">{{ p }}</a>
+        {% else %}<span class="page-link">…</span>{% endif %}
+      {% endfor %}
+      <a href="?page={{ pagination.next_num }}&{{ pp }}" class="page-link {% if not pagination.has_next %}disabled{% endif %}">›</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ── Modal: Add IP ── -->
+<div class="modal-overlay" id="modalAddIP">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Aggiungi Indirizzo IP</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalAddIP">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Indirizzo IP *</label>
+        <input id="ipAddress" class="form-control" placeholder="192.168.1.10" required>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Hostname</label>
+          <input id="ipHostname" class="form-control" placeholder="server01.local">
+        </div>
+        <div class="form-group">
+          <label class="form-label">MAC Address</label>
+          <input id="ipMac" class="form-control" placeholder="AA:BB:CC:DD:EE:FF">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Tipo Dispositivo</label>
+          <select id="ipDevType" class="form-control filter-select" style="width:100%">
+            <option value="">— Seleziona —</option>
+            <option value="server">Server</option>
+            <option value="workstation">Workstation</option>
+            <option value="router">Router</option>
+            <option value="switch">Switch</option>
+            <option value="printer">Stampante</option>
+            <option value="ap">Access Point</option>
+            <option value="phone">VoIP Phone</option>
+            <option value="other">Altro</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stato</label>
+          <select id="ipStatus" class="form-control filter-select" style="width:100%">
+            <option value="used">In uso</option>
+            <option value="reserved">Riservato</option>
+            <option value="dhcp">DHCP</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrizione</label>
+        <input id="ipDesc" class="form-control" placeholder="Opzionale">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalAddIP">Annulla</button>
+      <button class="btn btn-primary" onclick="submitAddIP()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function sortBy(field) {
+  var params  = new URLSearchParams(window.location.search);
+  var curSort = params.get('sort') || 'ip_address';
+  var curDir  = params.get('dir')  || 'asc';
+  if (curSort === field) {
+    params.set('dir', curDir === 'asc' ? 'desc' : 'asc');
+  } else {
+    params.set('sort', field);
+    params.set('dir', 'asc');
+  }
+  params.set('page', '1');
+  window.location.search = params.toString();
+}
+
+async function submitAddIP() {
+  var payload = {
+    ip_address:  document.getElementById('ipAddress').value.trim(),
+    hostname:    document.getElementById('ipHostname').value.trim(),
+    mac_address: document.getElementById('ipMac').value.trim(),
+    device_type: document.getElementById('ipDevType').value,
+    status:      document.getElementById('ipStatus').value,
+    description: document.getElementById('ipDesc').value.trim(),
+  };
+  if (!payload.ip_address) { showToast('Inserisci un IP', 'error'); return; }
+  await apiFetch('/ipam/api/ip-records', { method:'POST', body: JSON.stringify(payload) });
+  showToast('IP aggiunto con successo', 'success');
+  closeModal('modalAddIP');
+  setTimeout(function(){ window.location.reload(); }, 800);
+}
+
+async function deleteIP(id, addr) {
+  if (!confirm('Eliminare l\'IP ' + addr + '?')) return;
+  await apiFetch('/ipam/api/ip-records/' + id, { method:'DELETE' });
+  showToast('IP eliminato', 'success');
+  setTimeout(function(){ window.location.reload(); }, 600);
+}
+</script>
+<style>
+.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+.sortable:hover { color:var(--text-primary); }
+.sort-icon { margin-left:3px; vertical-align:middle; opacity:.5; }
+.sort-asc .sort-icon, .sort-desc .sort-icon { opacity:1; color:var(--accent); }
+</style>
+{% endblock %}

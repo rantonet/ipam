@@ -1,0 +1,788 @@
+{% extends "base.html" %}
+{% block title %}{{ network.name }}{% endblock %}
+
+{% block page_title %}
+<div>
+  <div class="breadcrumb" style="margin-bottom:.2rem">
+    <a href="{{ url_for('networks') }}">Reti</a>
+    <span class="breadcrumb-sep">/</span>
+    {% if network.parent_id %}
+    <a href="{{ url_for('network_detail', net_id=network.parent_id) }}">Supernet</a>
+    <span class="breadcrumb-sep">/</span>
+    {% endif %}
+    <span>{{ network.name }}</span>
+  </div>
+  <div class="page-title" style="font-size:14px">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
+    {{ network.address }}/{{ network.cidr }}
+  </div>
+</div>
+{% endblock %}
+
+{% block header_actions %}
+<button class="btn btn-secondary btn-sm" onclick="openEditNet()">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+  Modifica
+</button>
+{% if network.network_type == 'subnet' %}
+<button class="btn btn-secondary btn-sm" id="btnScan" onclick="startScan()">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+  Scan
+</button>
+<button class="btn btn-primary btn-sm" onclick="openModal('modalAddIP')">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  Aggiungi IP
+</button>
+{% endif %}
+<button class="btn btn-danger btn-sm" onclick="deleteCurrentNet()">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+  Elimina
+</button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Scan progress bar -->
+<div id="scanProgressWrap" style="display:none;margin-bottom:1rem">
+  <div class="card">
+    <div class="card-body" style="padding:.75rem 1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
+        <span style="font-size:12px;font-weight:600;color:var(--text-secondary)" id="scanLabel">Scan in corso...</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-muted)" id="scanCount">0 / 0</span>
+      </div>
+      <div style="height:6px;background:var(--bg-elevated);border-radius:3px;overflow:hidden">
+        <div id="scanBar" style="height:100%;background:var(--accent);border-radius:3px;width:0%;transition:width .3s ease"></div>
+      </div>
+      <div style="margin-top:.4rem;font-size:11px;color:var(--text-muted)" id="scanStats"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Network info cards -->
+<div class="net-header-info">
+  <div class="net-info-item">
+    <div class="net-info-label">Network</div>
+    <div class="net-info-value">{{ network.address }}/{{ network.cidr }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Subnet Mask</div>
+    <div class="net-info-value">{{ network.netmask }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Broadcast</div>
+    <div class="net-info-value">{{ network.broadcast }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Host Totali</div>
+    <div class="net-info-value">{{ "{:,}".format(network.total_hosts) }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">IP in Uso</div>
+    <div class="net-info-value" style="color:var(--accent)">{{ "{:,}".format(network.used_count) }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">IP Disponibili</div>
+    <div class="net-info-value" style="color:var(--green)">{{ "{:,}".format(network.available_count) }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Utilizzo</div>
+    <div class="net-info-value">
+      {% set up = network.usage_percent %}
+      <span style="color:{% if up < 50 %}var(--green){% elif up < 75 %}var(--yellow){% elif up < 90 %}var(--orange){% else %}var(--red){% endif %}">{{ up }}%</span>
+    </div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">VLAN</div>
+    <div class="net-info-value">{% if network.vlan_id %}<span class="vlan-tag">{{ network.vlan_id }}</span>{% else %}—{% endif %}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Location</div>
+    <div class="net-info-value" style="font-family:'IBM Plex Sans',sans-serif;font-size:12px">{{ network.location or '—' }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Stato</div>
+    <div class="net-info-value"><span class="badge badge-{{ network.status }}">{{ network.status }}</span></div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Country</div>
+    <div class="net-info-value" style="font-size:12px">{{ network.country or '—' }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Site</div>
+    <div class="net-info-value" style="font-size:12px">{{ network.site or '—' }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Usage</div>
+    <div class="net-info-value" style="font-size:12px">{{ network.usage or '—' }}</div>
+  </div>
+  <div class="net-info-item">
+    <div class="net-info-label">Zone</div>
+    <div class="net-info-value" style="font-size:12px">{{ network.zone or '—' }}</div>
+  </div>
+  {% if network.last_scan %}
+  <div class="net-info-item">
+    <div class="net-info-label">Ultimo Scan</div>
+    <div class="net-info-value" style="font-size:11px">{{ network.last_scan.strftime('%d/%m/%Y %H:%M') }}</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Usage bar -->
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-body" style="padding:.875rem 1.25rem">
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--text-muted);white-space:nowrap">Utilizzo indirizzi:</span>
+      <div class="usage-bar" style="flex:1;min-width:200px;height:10px;border-radius:5px">
+        {% set up = network.usage_percent %}
+        <div class="usage-fill {% if up < 50 %}usage-low{% elif up < 75 %}usage-med{% elif up < 90 %}usage-high{% else %}usage-crit{% endif %}" style="width:{{ up }}%"></div>
+      </div>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-secondary);white-space:nowrap">
+        {{ network.used_count }} / {{ network.total_hosts }} ({{ network.usage_percent }}%)
+      </span>
+    </div>
+    {% if network.description %}
+    <div style="margin-top:.5rem;font-size:12px;color:var(--text-muted)">{{ network.description }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Child subnets if supernet -->
+{% if children %}
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-header">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+      Reti Figlie ({{ children|length }})
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Nome</th><th>Network</th><th>Tipo</th><th>VLAN</th>
+        <th>Utilizzo</th><th>IP Usati</th><th>IP Liberi</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for child in children %}
+        {% set cs = child_stats.get(child.id, {'used':0,'total_hosts':0,'available':0,'usage_percent':0}) %}
+        <tr>
+          <td><a href="{{ url_for('network_detail', net_id=child.id) }}" style="color:var(--text-primary)">{{ child.name }}</a></td>
+          <td class="col-mono">{{ child.address }}/{{ child.cidr }}</td>
+          <td><span class="badge {% if child.network_type == 'supernet' %}badge-reserved{% else %}badge-active{% endif %}">{{ child.network_type }}</span></td>
+          <td>{% if child.vlan_id %}<span class="vlan-tag">{{ child.vlan_id }}</span>{% else %}—{% endif %}</td>
+          <td>
+            <div class="usage-bar-wrap">
+              <div class="usage-bar">
+                {% set up = cs.usage_percent %}
+                <div class="usage-fill {% if up < 50 %}usage-low{% elif up < 75 %}usage-med{% elif up < 90 %}usage-high{% else %}usage-crit{% endif %}" style="width:{{ up }}%"></div>
+              </div>
+              <span class="usage-pct">{{ up }}%</span>
+            </div>
+          </td>
+          <td class="col-mono" style="color:var(--accent)">{{ cs.used }}</td>
+          <td class="col-mono" style="color:var(--green)">{{ cs.available }}</td>
+          <td>
+            <button class="btn btn-secondary btn-sm btn-icon" onclick='openEditNet({{ child.id }}, {{ child.name|tojson }}, {{ child.address|tojson }}, {{ child.cidr }}, {{ (child.location or "")|tojson }}, {{ (child.description or "")|tojson }}, {% if child.vlan_id %}{{ child.vlan_id }}{% else %}null{% endif %}, {{ child.status|tojson }})' title="Modifica">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- IP Records Table -->
+{% if network.network_type == 'subnet' %}
+<div class="card">
+  <div class="card-header" style="flex-wrap:wrap;gap:.5rem">
+    <div class="card-title">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>
+      Indirizzi IP
+    </div>
+    <!-- Filtro visualizzazione -->
+    <div style="display:flex;align-items:center;gap:.5rem;margin-left:auto;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--text-muted)">Mostra:</span>
+      <div class="view-toggle">
+        <button class="vtbtn {% if view_mode == 'used' %}active{% endif %}" onclick="setView('used')">Solo occupati</button>
+        <button class="vtbtn {% if view_mode == 'free' %}active{% endif %}" onclick="setView('free')">Solo liberi</button>
+        <button class="vtbtn {% if view_mode == 'all' %}active{% endif %}" onclick="setView('all')">Tutta la subnet</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="ipTable">
+      <thead>
+        <tr>
+          {% macro sort_th(field, label) %}
+          <th class="sortable {% if sort_by == field %}sort-{{ sort_dir }}{% endif %}"
+              onclick="sortBy('{{ field }}')">
+            {{ label }}
+            <svg class="sort-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              {% if sort_by == field and sort_dir == 'asc' %}
+              <polyline points="18 15 12 9 6 15"/>
+              {% elif sort_by == field and sort_dir == 'desc' %}
+              <polyline points="6 9 12 15 18 9"/>
+              {% else %}
+              <polyline points="6 9 12 15 18 9"/><polyline points="18 15 12 9 6 15" opacity=".3"/>
+              {% endif %}
+            </svg>
+          </th>
+          {% endmacro %}
+          {{ sort_th('ip_address', 'Indirizzo IP') }}
+          {{ sort_th('hostname', 'Hostname') }}
+          {{ sort_th('mac_address', 'MAC Address') }}
+          {{ sort_th('switch_name', 'Switch') }}
+          {{ sort_th('switch_port', 'Porta') }}
+          {{ sort_th('device_type', 'Dispositivo') }}
+          {{ sort_th('status', 'Stato') }}
+          {{ sort_th('last_seen', 'Ultimo Rilevato') }}
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ip in ip_records %}
+        <tr>
+          <td class="col-mono">{{ ip.ip_address }}</td>
+          <td style="font-size:12px">{{ ip.hostname or '—' }}</td>
+          <td class="col-mono" style="font-size:11px">{{ ip.mac_address or '—' }}</td>
+          <td style="font-size:11px;color:var(--text-muted)" title="{{ ip.switch_name or '' }}">{{ ip.switch_name or '—' }}</td>
+          <td style="font-size:11px;color:var(--text-muted);font-family:'IBM Plex Mono',monospace">{{ ip.switch_port or '—' }}</td>
+          <td style="font-size:12px">{{ ip.device_type or '—' }}</td>
+          <td><span class="badge badge-{{ ip.status }}">{{ ip.status }}</span></td>
+          <td style="font-size:11px;color:var(--text-muted)">
+            {{ ip.last_seen.strftime('%d/%m/%Y %H:%M') if ip.last_seen else '—' }}
+          </td>
+          <td style="white-space:nowrap">
+            {% if ip.id %}
+            <button class="btn btn-secondary btn-sm btn-icon" style="margin-right:2px"
+              onclick='openEditIP({{ ip.id }}, {{ ip.ip_address|tojson }}, {{ (ip.hostname or "")|tojson }}, {{ (ip.mac_address or "")|tojson }}, {{ (ip.device_type or "")|tojson }}, {{ ip.status|tojson }}, {{ (ip.description or "")|tojson }})'
+              title="Modifica">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="btn btn-secondary btn-sm btn-icon" style="margin-right:2px"
+              onclick="clearIP({{ ip.id }}, '{{ ip.ip_address }}')" title="Pulisci campi">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20H7L3 16l11-11 7 7-1 2z"/><path d="M6 11l7 7"/></svg>
+            </button>
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteIP({{ ip.id }}, '{{ ip.ip_address }}')" title="Elimina">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            </button>
+            {% else %}
+            <button class="btn btn-secondary btn-sm btn-icon" style="margin-right:2px"
+              onclick="openAddIPPrefill('{{ ip.ip_address }}')" title="Registra questo IP">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7">
+          <div class="empty-state">
+            <div class="empty-title">Nessun IP registrato</div>
+            <div class="empty-sub">Avvia uno scan o aggiungi manualmente</div>
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pagination and pagination.pages > 1 %}
+  <div class="pagination">
+    <div class="page-info">{{ (pagination.page-1)*50+1 }}–{{ [pagination.page*50, pagination.total]|min }} di {{ pagination.total }}</div>
+    <div class="page-links">
+      <a href="?page={{ pagination.prev_num }}&view={{ view_mode }}&sort={{ sort_by }}&dir={{ sort_dir }}" class="page-link {% if not pagination.has_prev %}disabled{% endif %}">‹</a>
+      {% for p in pagination.iter_pages() %}
+        {% if p %}<a href="?page={{ p }}&view={{ view_mode }}&sort={{ sort_by }}&dir={{ sort_dir }}" class="page-link {% if p == pagination.page %}active{% endif %}">{{ p }}</a>
+        {% else %}<span class="page-link">…</span>{% endif %}
+      {% endfor %}
+      <a href="?page={{ pagination.next_num }}&view={{ view_mode }}&sort={{ sort_by }}&dir={{ sort_dir }}" class="page-link {% if not pagination.has_next %}disabled{% endif %}">›</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ── Modal: Edit Network ── -->
+<div class="modal-overlay" id="modalEditNet">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Modifica Rete</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalEditNet">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editNetId">
+      <div class="form-group">
+        <label class="form-label">Nome *</label>
+        <input id="editNetName" class="form-control">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Indirizzo</label>
+          <input id="editNetAddress" class="form-control" readonly style="opacity:.6">
+        </div>
+        <div class="form-group">
+          <label class="form-label">CIDR</label>
+          <input id="editNetCidr" class="form-control" readonly style="opacity:.6">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">VLAN ID</label>
+          <input id="editNetVlan" class="form-control" type="number" min="1" max="4094">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stato</label>
+          <select id="editNetStatus" class="form-control filter-select" style="width:100%">
+            <option value="active">active</option>
+            <option value="reserved">reserved</option>
+            <option value="deprecated">deprecated</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Location</label>
+        <input id="editNetLocation" class="form-control">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Country</label>
+          <input id="editNetCountry" class="form-control" placeholder="es. Italy">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Site</label>
+          <input id="editNetSite" class="form-control" placeholder="es. Milano DC1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Usage</label>
+          <input id="editNetUsage" class="form-control" placeholder="es. Production">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Zone</label>
+          <input id="editNetZone" class="form-control" placeholder="es. DMZ">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Gateway</label>
+          <input id="editNetGateway" class="form-control" placeholder="es. 192.168.1.1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tipo</label>
+          <select id="editNetType" class="form-control filter-select" style="width:100%">
+            <option value="subnet">Subnet</option>
+            <option value="supernet">Supernet</option>
+            <option value="vlan">VLAN Network</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrizione</label>
+        <input id="editNetDesc" class="form-control">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalEditNet">Annulla</button>
+      <button class="btn btn-primary" onclick="submitEditNet()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Edit IP ── -->
+<div class="modal-overlay" id="modalEditIP">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Modifica IP <span id="editIPTitle" style="color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:13px"></span></div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalEditIP">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editIPId">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Hostname</label>
+          <input id="editIPHostname" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label">MAC Address</label>
+          <input id="editIPMac" class="form-control">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Tipo Dispositivo</label>
+          <select id="editIPDevType" class="form-control filter-select" style="width:100%">
+            <option value="">— Seleziona —</option>
+            <option value="server">Server</option>
+            <option value="workstation">Workstation</option>
+            <option value="router">Router</option>
+            <option value="switch">Switch</option>
+            <option value="printer">Stampante</option>
+            <option value="ap">Access Point</option>
+            <option value="phone">VoIP Phone</option>
+            <option value="other">Altro</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stato</label>
+          <select id="editIPStatus" class="form-control filter-select" style="width:100%">
+            <option value="used">used</option>
+            <option value="reserved">reserved</option>
+            <option value="dhcp">dhcp</option>
+            <option value="available">available</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrizione</label>
+        <input id="editIPDesc" class="form-control">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalEditIP">Annulla</button>
+      <button class="btn btn-primary" onclick="submitEditIP()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Add IP ── -->
+<div class="modal-overlay" id="modalAddIP">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Aggiungi IP a {{ network.name }}</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalAddIP">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Indirizzo IP *</label>
+        <input id="ipAddress" class="form-control" placeholder="{{ network.address }}.10">
+        <div class="form-hint">Range: {{ network.address }}/{{ network.cidr }}</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Hostname</label>
+          <input id="ipHostname" class="form-control" placeholder="server01.local">
+        </div>
+        <div class="form-group">
+          <label class="form-label">MAC Address</label>
+          <input id="ipMac" class="form-control" placeholder="AA:BB:CC:DD:EE:FF">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Tipo Dispositivo</label>
+          <select id="ipDevType" class="form-control filter-select" style="width:100%">
+            <option value="">— Seleziona —</option>
+            <option value="server">Server</option>
+            <option value="workstation">Workstation</option>
+            <option value="router">Router</option>
+            <option value="switch">Switch</option>
+            <option value="printer">Stampante</option>
+            <option value="ap">Access Point</option>
+            <option value="phone">VoIP Phone</option>
+            <option value="other">Altro</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stato</label>
+          <select id="ipStatus" class="form-control filter-select" style="width:100%">
+            <option value="used">In uso</option>
+            <option value="reserved">Riservato</option>
+            <option value="dhcp">DHCP</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrizione</label>
+        <input id="ipDesc" class="form-control" placeholder="Opzionale">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalAddIP">Annulla</button>
+      <button class="btn btn-primary" onclick="submitAddIP()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal Elimina Forzata ────────────────────────────────────── -->
+<div class="modal-overlay" id="modalForceDelete">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-header" style="background:#dc3545;color:#fff">
+      <h3 class="modal-title" style="font-size:1rem">
+        ⚠️ ATTENZIONE: ELIMINAZIONE SUBNET
+      </h3>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalForceDelete"
+              style="background:rgba(255,255,255,.2);color:#fff;border:none">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-weight:600;color:#dc3545;margin-bottom:.5rem">
+        STAI PER CANCELLARE UN'INTERA SUBNET!
+      </p>
+      <p id="forceDeleteMsg" style="margin-bottom:1rem;font-size:.92rem"></p>
+      <p style="margin-bottom:.4rem;font-size:.9rem">
+        Per confermare scrivi la parola <strong>ELIMINA</strong> nella casella sottostante:
+      </p>
+      <input id="forceDeleteConfirmInput" class="form-control" type="text"
+             placeholder="ELIMINA" autocomplete="off"
+             oninput="document.getElementById('btnForceDeleteConfirm').disabled = this.value !== 'ELIMINA'">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalForceDelete">Annulla</button>
+      <button id="btnForceDeleteConfirm" class="btn btn-danger" disabled
+              onclick="submitForceDelete()">Elimina tutto</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+var NET_ID = {{ network.id }};
+var ACTIVE_NET_ID = {{ network.id }};
+
+// Dati rete corrente (Jinja -> JS, evita conflitti nomi)
+var NET_DATA = {
+  id:       {{ network.id }},
+  country:  {{ (network.country  or '')|tojson }},
+  site:     {{ (network.site     or '')|tojson }},
+  usage:    {{ (network.usage    or '')|tojson }},
+  zone:     {{ (network.zone     or '')|tojson }},
+  gateway:  {{ (network.gateway  or '')|tojson }},
+  name:     {{ network.name|tojson }},
+  address:  {{ network.address|tojson }},
+  cidr:     {{ network.cidr }},
+  loc:      {{ (network.location or '')|tojson }},
+  desc:     {{ (network.description or '')|tojson }},
+  vlan:     {% if network.vlan_id %}{{ network.vlan_id }}{% else %}null{% endif %},
+  status:   {{ network.status|tojson }},
+  nettype:  {{ network.network_type|tojson }},
+};
+
+// ── Navigazione con parametri URL ────────────────────────────────
+function setView(mode) {
+  var u = new URL(window.location.href);
+  u.searchParams.set('view', mode);
+  u.searchParams.set('page', '1');
+  window.location.href = u.toString();
+}
+
+function sortBy(field) {
+  var u   = new URL(window.location.href);
+  var cur = u.searchParams.get('sort') || 'ip_address';
+  var dir = u.searchParams.get('dir')  || 'asc';
+  dir = (cur === field && dir === 'asc') ? 'desc' : 'asc';
+  u.searchParams.set('sort', field);
+  u.searchParams.set('dir',  dir);
+  u.searchParams.set('page', '1');
+  window.location.href = u.toString();
+}
+
+// ── Edit Network ─────────────────────────────────────────────────
+function openEditNet(id, name, address, cidr, netloc, desc, vlan, status) {
+  // Se chiamato senza parametri usa i dati della rete corrente
+  if (id === undefined) {
+    id = NET_DATA.id; name = NET_DATA.name; address = NET_DATA.address;
+    cidr = NET_DATA.cidr; netloc = NET_DATA.loc; desc = NET_DATA.desc;
+    vlan = NET_DATA.vlan; status = NET_DATA.status;
+  }
+  document.getElementById('editNetId').value       = id;
+  document.getElementById('editNetName').value     = name     || '';
+  document.getElementById('editNetAddress').value  = address  || '';
+  document.getElementById('editNetCidr').value     = cidr     || '';
+  document.getElementById('editNetLocation').value = netloc   || '';
+  document.getElementById('editNetDesc').value     = desc     || '';
+  document.getElementById('editNetVlan').value     = vlan     || '';
+  document.getElementById('editNetStatus').value   = status   || 'active';
+  document.getElementById('editNetCountry').value  = NET_DATA.country || '';
+  document.getElementById('editNetSite').value     = NET_DATA.site    || '';
+  document.getElementById('editNetUsage').value    = NET_DATA.usage   || '';
+  document.getElementById('editNetZone').value     = NET_DATA.zone    || '';
+  document.getElementById('editNetGateway').value  = NET_DATA.gateway || '';
+  document.getElementById('editNetType').value     = NET_DATA.nettype || 'subnet';
+  openModal('modalEditNet');
+}
+
+async function submitEditNet() {
+  var id = document.getElementById('editNetId').value;
+  var payload = {
+    name:         document.getElementById('editNetName').value.trim(),
+    location:     document.getElementById('editNetLocation').value.trim(),
+    description:  document.getElementById('editNetDesc').value.trim(),
+    country:      document.getElementById('editNetCountry').value.trim(),
+    site:         document.getElementById('editNetSite').value.trim(),
+    usage:        document.getElementById('editNetUsage').value.trim(),
+    zone:         document.getElementById('editNetZone').value.trim(),
+    gateway:      document.getElementById('editNetGateway').value.trim(),
+    network_type: document.getElementById('editNetType').value,
+    vlan_id:      parseInt(document.getElementById('editNetVlan').value) || null,
+    status:       document.getElementById('editNetStatus').value,
+  };
+  if (!payload.name) { showToast('Il nome e\' obbligatorio', 'error'); return; }
+  await apiFetch('/ipam/api/networks/' + id, { method: 'PUT', body: JSON.stringify(payload) });
+  showToast('Rete aggiornata', 'success');
+  closeModal('modalEditNet');
+  _treeData = null;
+  setTimeout(function(){ window.location.reload(); }, 600);
+}
+
+// ── Edit IP ──────────────────────────────────────────────────────
+function openEditIP(id, ip, hostname, mac, devtype, status, desc) {
+  document.getElementById('editIPId').value       = id;
+  document.getElementById('editIPTitle').textContent = ip;
+  document.getElementById('editIPHostname').value = hostname || '';
+  document.getElementById('editIPMac').value      = mac || '';
+  document.getElementById('editIPDevType').value  = devtype || '';
+  document.getElementById('editIPStatus').value   = status || 'used';
+  document.getElementById('editIPDesc').value     = desc || '';
+  openModal('modalEditIP');
+}
+
+async function submitEditIP() {
+  var id = document.getElementById('editIPId').value;
+  var payload = {
+    hostname:    document.getElementById('editIPHostname').value.trim(),
+    mac_address: document.getElementById('editIPMac').value.trim(),
+    device_type: document.getElementById('editIPDevType').value,
+    status:      document.getElementById('editIPStatus').value,
+    description: document.getElementById('editIPDesc').value.trim(),
+  };
+  await apiFetch('/ipam/api/ip-records/' + id, { method: 'PUT', body: JSON.stringify(payload) });
+  showToast('IP aggiornato', 'success');
+  closeModal('modalEditIP');
+  setTimeout(function(){ window.location.reload(); }, 600);
+}
+
+// ── Add IP (con IP precompilato da vista all/free) ───────────────
+function openAddIPPrefill(ip) {
+  document.getElementById('ipAddress').value  = ip;
+  document.getElementById('ipHostname').value = '';
+  document.getElementById('ipMac').value      = '';
+  document.getElementById('ipDevType').value  = '';
+  document.getElementById('ipStatus').value   = 'used';
+  document.getElementById('ipDesc').value     = '';
+  openModal('modalAddIP');
+}
+
+// ── Add IP ───────────────────────────────────────────────────────
+async function submitAddIP() {
+  var payload = {
+    ip_address:  document.getElementById('ipAddress').value.trim(),
+    hostname:    document.getElementById('ipHostname').value.trim(),
+    mac_address: document.getElementById('ipMac').value.trim(),
+    device_type: document.getElementById('ipDevType').value,
+    status:      document.getElementById('ipStatus').value,
+    description: document.getElementById('ipDesc').value.trim(),
+    network_id:  NET_ID,
+  };
+  if (!payload.ip_address) { showToast('Inserisci un IP', 'error'); return; }
+  await apiFetch('/ipam/api/ip-records', { method: 'POST', body: JSON.stringify(payload) });
+  showToast('IP aggiunto', 'success');
+  closeModal('modalAddIP');
+  setTimeout(function(){ window.location.reload(); }, 800);
+}
+
+// ── Delete IP ────────────────────────────────────────────────────
+async function deleteIP(id, addr) {
+  if (!confirm('Eliminare l\'IP ' + addr + '?')) return;
+  await apiFetch('/ipam/api/ip-records/' + id, { method: 'DELETE' });
+  showToast('IP eliminato', 'success');
+  setTimeout(function(){ window.location.reload(); }, 600);
+}
+
+// ── Clear IP ─────────────────────────────────────────────────────
+async function clearIP(id, addr) {
+  if (!confirm('Pulire tutti i campi di ' + addr + '?\n(hostname, MAC, dispositivo, descrizione verranno azzerati)')) return;
+  await apiFetch('/ipam/api/ip-records/' + id + '/clear', { method: 'PUT' });
+  showToast('Campi azzerati: ' + addr, 'success');
+  setTimeout(function(){ window.location.reload(); }, 600);
+}
+
+// ── Delete current network ────────────────────────────────────────
+var _forceDeleteNetId = null;
+
+function deleteCurrentNet() {
+  _forceDeleteNetId = NET_ID;
+  document.getElementById('forceDeleteMsg').innerHTML =
+    'La subnet <strong>' + NET_DATA.address + '/' + NET_DATA.cidr + '</strong>' +
+    ' (<em>' + NET_DATA.name + '</em>) e tutti i suoi indirizzi IP verranno' +
+    ' <strong>eliminati definitivamente</strong> e l\'operazione non sarà reversibile.';
+  document.getElementById('forceDeleteConfirmInput').value = '';
+  document.getElementById('btnForceDeleteConfirm').disabled = true;
+  openModal('modalForceDelete');
+}
+
+async function submitForceDelete() {
+  if (!_forceDeleteNetId) return;
+  try {
+    var res = await apiFetch('/ipam/api/networks/' + _forceDeleteNetId + '?force=1', { method: 'DELETE' });
+    closeModal('modalForceDelete');
+    showToast('Rete eliminata (' + (res.ip_deleted || 0) + ' IP rimossi)', 'success');
+    setTimeout(function(){ window.location.href = '/ipam/networks'; }, 1000);
+  } catch(e) { /* errore già mostrato dal toast */ }
+}
+
+// ── Scan ─────────────────────────────────────────────────────────
+var _scanPollInterval = null;
+
+async function startScan() {
+  var btn = document.getElementById('btnScan');
+  btn.disabled = true;
+  btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Scanning...';
+  try {
+    await apiFetch('/ipam/api/networks/' + NET_ID + '/scan', { method: 'POST' });
+    showToast('Scan avviato', 'info');
+    document.getElementById('scanProgressWrap').style.display = 'block';
+    _scanPollInterval = setInterval(pollScanStatus, 1000);
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg> Scan';
+  }
+}
+
+async function pollScanStatus() {
+  try {
+    var s = await apiFetch('/ipam/api/networks/' + NET_ID + '/scan/status');
+    var pct = s.total > 0 ? Math.round(s.progress / s.total * 100) : 0;
+    document.getElementById('scanBar').style.width   = pct + '%';
+    document.getElementById('scanCount').textContent = (s.progress||0) + ' / ' + (s.total||0);
+    document.getElementById('scanLabel').textContent = s.running
+      ? 'Scan in corso: ' + (s.name||'') + ' (' + pct + '%)'
+      : (s.error ? 'Errore scan' : 'Scan completato');
+    var stats = [];
+    if (s.found   > 0) stats.push('<span style="color:var(--green)">+' + s.found + ' nuovi</span>');
+    if (s.updated > 0) stats.push('<span style="color:var(--accent)">' + s.updated + ' aggiornati</span>');
+    if (s.errors  > 0) stats.push('<span style="color:var(--red)">'   + s.errors  + ' errori</span>');
+    if (s.duration)    stats.push('<span style="color:var(--text-muted)">' + s.duration + 's</span>');
+    if (s.error)       stats.push('<span style="color:var(--red);font-size:.8em">' + s.error + '</span>');
+    document.getElementById('scanStats').innerHTML = stats.join(' &nbsp; ');
+    if (!s.running) {
+      clearInterval(_scanPollInterval);
+      var btn = document.getElementById('btnScan');
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg> Scan';
+      if (s.error) {
+        showToast('Errore scan: ' + s.error, 'error');
+      } else {
+        showToast('Scan completato: +' + (s.found||0) + ' nuovi, ' + (s.updated||0) + ' aggiornati', 'success');
+        setTimeout(function(){ window.location.reload(); }, 2000);
+      }
+    }
+  } catch(e) { clearInterval(_scanPollInterval); }
+}
+</script>
+<style>
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+.view-toggle { display:flex; gap:2px; background:var(--bg-elevated); border-radius:var(--radius); padding:2px; }
+.vtbtn { background:none; border:none; color:var(--text-muted); font-size:11px; font-weight:500; padding:3px 9px; border-radius:var(--radius-sm); cursor:pointer; white-space:nowrap; transition:all var(--transition); font-family:'IBM Plex Sans',sans-serif; }
+.vtbtn:hover { color:var(--text-primary); background:var(--bg-hover); }
+.vtbtn.active { background:var(--bg-surface); color:var(--accent); box-shadow:0 1px 3px rgba(0,0,0,.3); }
+.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+.sortable:hover { color:var(--text-primary); }
+.sort-icon { margin-left:3px; vertical-align:middle; opacity:.5; }
+.sort-asc .sort-icon, .sort-desc .sort-icon { opacity:1; color:var(--accent); }
+</style>
+{% endblock %}

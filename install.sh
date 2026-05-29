@@ -1,0 +1,352 @@
+#!/usr/bin/env bash
+# ================================================================
+#  install.sh  --  IPAM su Apache + Gunicorn
+#
+#  Distribuzioni supportate:
+#    Debian / Ubuntu
+#    RHEL / Rocky Linux / AlmaLinux / CentOS 7+ / Fedora
+#
+#  Utilizzo:
+#    chmod +x install.sh
+#    sudo ./install.sh [INSTALL_DIR]
+#
+#  Esempio con directory personalizzata:
+#    sudo ./install.sh /var/www/html/ipam
+# ================================================================
+set -euo pipefail
+
+#  Directory di installazione (default /var/www/html/ipam) 
+INSTALL_DIR="${1:-/var/www/html/ipam}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+#  Controllo root 
+if [[ $EUID -ne 0 ]]; then
+    echo "[ERRORE] Esegui come root: sudo $0" >&2
+    exit 1
+fi
+
+# ================================================================
+#  RILEVAMENTO DISTRO
+# ================================================================
+detect_distro() {
+    if [[ -f /etc/debian_version ]]; then
+        FAMILY="debian"
+        PKG_MGR="apt-get"
+        APACHE_SVC="apache2"
+        APACHE_USER="www-data"
+        CONF_DEST="/etc/apache2/conf-available/ipam.conf"
+    elif [[ -f /etc/redhat-release ]]; then
+        FAMILY="redhat"
+        APACHE_SVC="httpd"
+        APACHE_USER="apache"
+        CONF_DEST="/etc/httpd/conf.d/ipam.conf"
+        RHEL_VER=$(rpm -E '%{rhel}' 2>/dev/null || echo "0")
+        if [[ "$RHEL_VER" -ge 8 ]]; then
+            PKG_MGR="dnf"
+        else
+            PKG_MGR="yum"
+        fi
+    else
+        echo "[ERRORE] Distribuzione non supportata." >&2
+        exit 1
+    fi
+}
+
+detect_distro
+
+if [[ "$FAMILY" == "debian" ]]; then
+    DISTRO_LABEL=$(. /etc/os-release && echo "$PRETTY_NAME")
+else
+    DISTRO_LABEL=$(cat /etc/redhat-release)
+fi
+
+echo "===================================================="
+echo "  IPAM -- Installazione"
+echo "  Distro  : ${DISTRO_LABEL}"
+echo "  Dir     : ${INSTALL_DIR}"
+echo "  Famiglia: ${FAMILY}"
+echo "===================================================="
+
+# ================================================================
+#  STEP 1 -- Pacchetti di sistema
+# ================================================================
+echo ""
+echo "[1/6] Installo Apache e dipendenze..."
+
+if [[ "$FAMILY" == "debian" ]]; then
+    apt-get update -qq
+    apt-get install -y apache2 python3 python3-pip python3-venv
+
+elif [[ "$FAMILY" == "redhat" ]]; then
+    if ! rpm -q epel-release &>/dev/null; then
+        $PKG_MGR install -y epel-release
+    fi
+    if [[ "$RHEL_VER" -ge 8 ]]; then
+        dnf config-manager --set-enabled powertools 2>/dev/null \
+            || dnf config-manager --set-enabled crb 2>/dev/null \
+            || true
+        $PKG_MGR install -y httpd python3 python3-pip python3-virtualenv
+    else
+        $PKG_MGR install -y httpd python3 python3-pip python3-virtualenv
+    fi
+fi
+
+# ================================================================
+#  STEP 2 -- Virtualenv Python + dipendenze (Flask + Gunicorn)
+#  Il venv viene creato in ${INSTALL_DIR}/venv e isola
+#  completamente le dipendenze dal Python di sistema.
+# ================================================================
+echo ""
+echo "[2/6] Creo virtualenv e installo dipendenze Python..."
+
+VENV_DIR="${INSTALL_DIR}/venv"
+
+# Crea il venv (idempotente: non sovrascrive se già esiste)
+python3 -m venv "${VENV_DIR}"
+
+# Installa le dipendenze nel venv
+if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
+    "${VENV_DIR}/bin/pip" install --quiet -r "${SCRIPT_DIR}/requirements.txt"
+else
+    "${VENV_DIR}/bin/pip" install --quiet \
+        flask flask-sqlalchemy flask-login werkzeug gunicorn \
+        dnspython apscheduler ldap3
+fi
+
+echo "  Virtualenv: ${VENV_DIR}"
+
+# ================================================================
+#  STEP 3 -- Copia file applicazione
+#  Gestisce layout piatto (tutti i file in SCRIPT_DIR) e
+#  layout strutturato (con sottodirectory templates/ e static/).
+# ================================================================
+echo ""
+echo "[3/6] Copio i file in ${INSTALL_DIR}..."
+
+mkdir -p "${INSTALL_DIR}/instance"
+mkdir -p "${INSTALL_DIR}/static/css"
+mkdir -p "${INSTALL_DIR}/templates"
+
+cp "${SCRIPT_DIR}/app.py"           "${INSTALL_DIR}/"
+cp "${SCRIPT_DIR}/wsgi_gunicorn.py" "${INSTALL_DIR}/"
+cp "${SCRIPT_DIR}/scanner.py"       "${INSTALL_DIR}/"
+cp "${SCRIPT_DIR}/main.py"          "${INSTALL_DIR}/" 2>/dev/null || true
+
+# Template HTML
+if [[ -d "${SCRIPT_DIR}/templates" ]]; then
+    cp -r "${SCRIPT_DIR}/templates/." "${INSTALL_DIR}/templates/"
+else
+    HTML_COUNT=$(find "${SCRIPT_DIR}" -maxdepth 1 -name "*.html" | wc -l)
+    if [[ "$HTML_COUNT" -eq 0 ]]; then
+        echo "[ERRORE] Nessun file .html trovato in ${SCRIPT_DIR}" >&2
+        exit 1
+    fi
+    cp "${SCRIPT_DIR}"/*.html "${INSTALL_DIR}/templates/"
+    echo "  Template: ${HTML_COUNT} file .html -> templates/ (layout piatto)"
+fi
+
+# CSS / file statici
+if [[ -d "${SCRIPT_DIR}/static" ]]; then
+    cp -r "${SCRIPT_DIR}/static/." "${INSTALL_DIR}/static/"
+elif [[ -f "${SCRIPT_DIR}/main.css" ]]; then
+    cp "${SCRIPT_DIR}/main.css" "${INSTALL_DIR}/static/css/main.css"
+    echo "  CSS: main.css -> static/css/ (layout piatto)"
+else
+    echo "  [WARN] main.css non trovato."
+fi
+
+# Assicura coding declaration UTF-8 (necessaria su Python 2.x / CentOS 7)
+for pyfile in "${INSTALL_DIR}/app.py" "${INSTALL_DIR}/wsgi_gunicorn.py"; do
+    if ! head -1 "$pyfile" | grep -q "coding"; then
+        sed -i '1s/^/# -*- coding: utf-8 -*-\n/' "$pyfile"
+    fi
+done
+
+echo "  Struttura installata:"
+find "${INSTALL_DIR}" \
+    -not -path "*/instance/*" \
+    -not -path "*/__pycache__/*" \
+    -type f | sed "s|${INSTALL_DIR}/||" | sort | sed 's/^/    /'
+
+# ================================================================
+#  STEP 4 -- Database SQLite
+#  Se instance/ipam.db e' presente nello zip, viene copiato con i
+#  dati esistenti. Altrimenti viene creato un DB vuoto.
+# ================================================================
+echo ""
+echo "[4/6] Inizializzo il database..."
+
+if [[ -f "${INSTALL_DIR}/instance/ipam.db" ]]; then
+    echo "  DB esistente rilevato in ${INSTALL_DIR}/instance/ipam.db -- non sovrascritto."
+elif [[ -f "${SCRIPT_DIR}/instance/ipam.db" ]]; then
+    cp "${SCRIPT_DIR}/instance/ipam.db" "${INSTALL_DIR}/instance/ipam.db"
+    echo "  DB copiato dall'archivio."
+else
+    IPAM_SEED=0 "${INSTALL_DIR}/venv/bin/python3" - << PYEOF
+import sys, os
+sys.path.insert(0, '${INSTALL_DIR}')
+os.environ['IPAM_SEED'] = '0'
+from app import app, db
+with app.app_context():
+    db.create_all()
+print("  DB creato (vuoto).")
+PYEOF
+fi
+
+# ================================================================
+#  STEP 5 -- Permessi + SELinux (solo Red Hat)
+# ================================================================
+echo ""
+echo "[5/6] Imposto permessi..."
+
+chown -R root:root "${INSTALL_DIR}"
+chmod -R 755 "${INSTALL_DIR}"
+chmod 750 "${INSTALL_DIR}/instance"
+chmod 640 "${INSTALL_DIR}/instance/ipam.db" 2>/dev/null || true
+
+if [[ "$FAMILY" == "redhat" ]]; then
+    if command -v semanage &>/dev/null && command -v restorecon &>/dev/null; then
+        semanage fcontext -a -t httpd_sys_content_t \
+            "${INSTALL_DIR}(/.*)?" 2>/dev/null \
+            || semanage fcontext -m -t httpd_sys_content_t \
+            "${INSTALL_DIR}(/.*)?"
+        semanage fcontext -a -t httpd_sys_rw_content_t \
+            "${INSTALL_DIR}/instance(/.*)?" 2>/dev/null \
+            || semanage fcontext -m -t httpd_sys_rw_content_t \
+            "${INSTALL_DIR}/instance(/.*)?"
+        restorecon -Rv "${INSTALL_DIR}" >/dev/null
+        echo "  SELinux: contesti applicati."
+    else
+        echo "  [WARN] semanage non trovato. Installa policycoreutils-python-utils se SELinux e' attivo."
+    fi
+    setsebool -P httpd_can_network_connect 1 2>/dev/null || true
+fi
+
+# ================================================================
+#  STEP 6 -- Servizio Gunicorn (systemd) + Apache reverse proxy
+#
+#  Architettura:
+#    Browser -> Apache :80 -> ProxyPass /ipam -> Gunicorn :8000/ipam -> Flask
+#    Apache serve /ipam/static direttamente dal filesystem.
+#
+#  Gunicorn usa Python 3 nativo, evitando il problema mod_wsgi/Python 2.7.
+#  Il middleware ReverseProxied in wsgi_gunicorn.py imposta SCRIPT_NAME=/ipam
+#  in modo che Flask generi tutti gli URL con il prefisso corretto.
+# ================================================================
+echo ""
+echo "[6/6] Configuro Gunicorn (systemd) e Apache..."
+
+VENV_DIR="${INSTALL_DIR}/venv"
+GUNICORN_BIN="${VENV_DIR}/bin/gunicorn"
+PYTHON_BIN="${VENV_DIR}/bin/python3"
+
+# -- Servizio systemd -------------------------------------------
+cat > /etc/systemd/system/ipam.service << SVCEOF
+[Unit]
+Description=IPAM Gunicorn daemon
+After=network.target
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=${INSTALL_DIR}
+Environment="PATH=${INSTALL_DIR}/venv/bin:/usr/local/bin:/usr/bin"
+Environment="IPAM_SEED=0"
+ExecStart=${GUNICORN_BIN} --bind 127.0.0.1:8000 --workers 1 --timeout 120 wsgi_gunicorn:application
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+systemctl daemon-reload
+systemctl enable ipam
+systemctl restart ipam
+sleep 2
+if systemctl is-active --quiet ipam; then
+    echo "  Gunicorn: riavviato su 127.0.0.1:8000"
+else
+    echo "  [WARN] Gunicorn non avviato. Controlla: journalctl -u ipam -n 30"
+fi
+
+# -- Configurazione Apache (generata con valori corretti) --------
+cat > "${CONF_DEST}" << APACHECONF
+# ipam.conf -- generato da install.sh
+# Distro: ${FAMILY} | Dir: ${INSTALL_DIR} | User: ${APACHE_USER}
+
+# File statici serviti direttamente da Apache (piu' veloce di Gunicorn)
+Alias /ipam/static ${INSTALL_DIR}/static
+
+<Directory ${INSTALL_DIR}/static>
+    Options -Indexes
+    AllowOverride None
+    Require all granted
+</Directory>
+
+# Proteggi il database SQLite
+<Directory ${INSTALL_DIR}/instance>
+    Require all denied
+</Directory>
+
+# Reverse proxy verso Gunicorn
+# ProxyPass /ipam/static ! esclude lo static dal proxy
+ProxyPass        /ipam/static !
+ProxyPass        /ipam  http://127.0.0.1:8000/ipam
+ProxyPassReverse /ipam  http://127.0.0.1:8000/ipam
+APACHECONF
+
+echo "  ipam.conf generato in ${CONF_DEST}"
+
+# -- Attiva moduli e servizio Apache ----------------------------
+if [[ "$FAMILY" == "debian" ]]; then
+    a2enmod proxy proxy_http 2>/dev/null || true
+    a2enconf ipam
+    systemctl enable --now apache2
+    systemctl reload apache2
+    if command -v ufw &>/dev/null && ufw status | grep -q "^Status: active"; then
+        ufw allow 80/tcp
+        echo "  Firewall (ufw): porta 80/tcp aperta."
+    fi
+
+elif [[ "$FAMILY" == "redhat" ]]; then
+    systemctl enable --now httpd
+    systemctl reload httpd
+    if systemctl is-active --quiet firewalld; then
+        firewall-cmd --permanent --add-service=http
+        firewall-cmd --reload
+        echo "  Firewall (firewalld): porta 80/tcp aperta."
+    else
+        echo "  [WARN] firewalld non attivo."
+    fi
+fi
+
+# ================================================================
+#  FINE
+# ================================================================
+SERVER_IP=$(hostname -I | awk '{print $1}')
+echo ""
+echo "===================================================="
+echo "  [OK] Installazione completata!"
+echo ""
+echo "  URL: http://${SERVER_IP}/ipam/"
+echo ""
+echo "  Comandi utili:"
+if [[ "$FAMILY" == "debian" ]]; then
+echo "  Gunicorn : systemctl status ipam"
+echo "  Log app  : journalctl -u ipam -f"
+echo "  Apache   : systemctl status apache2"
+echo "  Log http : tail -f /var/log/apache2/error.log"
+else
+echo "  Gunicorn : systemctl status ipam"
+echo "  Log app  : journalctl -u ipam -f"
+echo "  Apache   : systemctl status httpd"
+echo "  Log http : tail -f /etc/httpd/logs/error_log"
+fi
+echo ""
+echo "  Per aggiungere le tue reti:"
+echo "  -> http://${SERVER_IP}/ipam/networks"
+echo ""
+echo "  Virtualenv Python: ${INSTALL_DIR}/venv"
+echo "  Gunicorn:          ${INSTALL_DIR}/venv/bin/gunicorn"
+echo "===================================================="

@@ -1,0 +1,479 @@
+{% extends "base.html" %}
+{% block title %}Modifica Bulk{% endblock %}
+
+{% block page_title %}
+<div class="page-title">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+  Modifica Bulk
+</div>
+{% endblock %}
+
+{% block head %}
+<style>
+/* ── Bulk Edit ─────────────────────────── */
+.bulk-tabs { display:flex; gap:.25rem; margin-bottom:1rem; }
+.bulk-tab {
+  padding:.4rem 1rem; border-radius:var(--radius); border:1px solid var(--border);
+  background:var(--bg-elevated); color:var(--text-secondary);
+  cursor:pointer; font-size:12px; font-weight:500; transition:all var(--transition);
+}
+.bulk-tab:hover { border-color:var(--accent); color:var(--text-primary); }
+.bulk-tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+.bulk-tab .tab-count {
+  display:inline-block; background:rgba(255,255,255,.15);
+  border-radius:10px; padding:0 6px; font-size:10px; margin-left:4px;
+}
+
+.bulk-wrap { overflow-x:auto; }
+
+.bulk-table { width:100%; border-collapse:collapse; font-size:12px; }
+.bulk-table th {
+  background:var(--bg-elevated); color:var(--text-muted);
+  font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em;
+  padding:.5rem .6rem; border-bottom:2px solid var(--border);
+  white-space:nowrap; position:sticky; top:0; z-index:2;
+}
+.bulk-table th:first-child { width:32px; text-align:center; }
+
+/* Input row */
+.bulk-table tr.input-row td {
+  padding:.35rem .4rem;
+  border-bottom:1px solid var(--border);
+  background:var(--bg-elevated);
+  position:sticky; top:32px; z-index:1;
+}
+.bulk-table tr.input-row.mode-edit td {
+  background:rgba(47,129,247,.08);
+  border-bottom:2px solid var(--accent);
+}
+.bulk-table tr.input-row td:first-child {
+  text-align:center; font-size:10px; color:var(--text-muted);
+  font-weight:600; vertical-align:middle;
+}
+.bulk-table tr.input-row.mode-edit td:first-child { color:var(--accent); }
+
+.bulk-input {
+  width:100%; background:var(--bg-surface); border:1px solid var(--border);
+  border-radius:var(--radius-sm); color:var(--text-primary);
+  padding:.3rem .5rem; font-size:11px; font-family:'IBM Plex Mono',monospace;
+  transition:border-color var(--transition), background var(--transition);
+}
+.bulk-input:focus { outline:none; border-color:var(--accent); background:var(--bg-elevated); }
+.mode-edit .bulk-input.editable { border-color:var(--accent-dim); background:rgba(47,129,247,.05); }
+.mode-edit .bulk-input.editable:focus { border-color:var(--accent); background:var(--bg-elevated); }
+
+/* Data rows */
+.bulk-table tbody tr.data-row {
+  border-bottom:1px solid var(--border-subtle);
+  transition:background var(--transition);
+}
+.bulk-table tbody tr.data-row:hover { background:var(--bg-hover); }
+.bulk-table tbody tr.data-row.selected { background:rgba(47,129,247,.07); }
+.bulk-table tbody tr.data-row td { padding:.4rem .6rem; vertical-align:middle; }
+.bulk-table tbody tr.data-row td:first-child { text-align:center; }
+
+.bulk-table td.col-mono { font-family:'IBM Plex Mono',monospace; color:var(--text-secondary); }
+
+/* Action bar */
+#bulkActionBar {
+  position:fixed; bottom:0; left:var(--tree-w); right:0;
+  background:var(--bg-elevated); border-top:1px solid var(--accent);
+  padding:.75rem 1.5rem;
+  display:flex; align-items:center; gap:1rem;
+  transform:translateY(100%); transition:transform 200ms ease;
+  z-index:100;
+}
+#bulkActionBar.visible { transform:translateY(0); }
+#bulkActionBar .sel-info {
+  font-size:12px; color:var(--text-secondary);
+}
+#bulkActionBar .sel-count {
+  font-size:14px; font-weight:600; color:var(--accent);
+}
+#bulkActionBar .bar-spacer { flex:1; }
+
+.mode-badge {
+  font-size:10px; font-weight:600; letter-spacing:.05em;
+  padding:.15rem .5rem; border-radius:10px;
+  display:inline-flex; align-items:center; gap:4px;
+}
+.mode-badge.filter { background:var(--bg-hover); color:var(--text-muted); }
+.mode-badge.edit   { background:var(--accent-glow); color:var(--accent); }
+
+.empty-row td {
+  text-align:center; padding:2rem; color:var(--text-muted); font-size:12px;
+}
+
+/* Loading spinner */
+.bulk-loading { text-align:center; padding:2rem; color:var(--text-muted); font-size:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Tabs -->
+<div class="bulk-tabs">
+  <button class="bulk-tab active" id="tab-supernet" onclick="switchTab('supernet')">
+    Supernet <span class="tab-count" id="cnt-supernet">…</span>
+  </button>
+  <button class="bulk-tab" id="tab-subnet" onclick="switchTab('subnet')">
+    Subnet <span class="tab-count" id="cnt-subnet">…</span>
+  </button>
+  <button class="bulk-tab" id="tab-ip" onclick="switchTab('ip')">
+    Indirizzi IP <span class="tab-count" id="cnt-ip">…</span>
+  </button>
+</div>
+
+<!-- Info strip -->
+<div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;font-size:11px;color:var(--text-muted)">
+  <span id="rowCountInfo">Caricamento…</span>
+  <span style="color:var(--border)">|</span>
+  <span id="modeBadge" class="mode-badge filter">🔍 Modalità filtro</span>
+  <span style="color:var(--border)">|</span>
+  <span style="color:var(--text-muted)">Compila un campo e premi <kbd style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:3px;padding:0 4px">Invio</kbd> per filtrare; seleziona righe per modificarle in blocco.</span>
+</div>
+
+<!-- Table -->
+<div class="card" style="margin-top:0;padding:0;overflow:hidden">
+  <div class="bulk-wrap">
+    <table class="bulk-table" id="bulkTable">
+      <thead id="bulkHead"></thead>
+      <tbody id="bulkBody">
+        <tr><td colspan="99" class="bulk-loading">Caricamento…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination / load-more (IP only) -->
+<div id="loadMoreBar" style="display:none;text-align:center;margin-top:.75rem">
+  <button class="btn btn-secondary btn-sm" id="loadMoreBtn" onclick="loadMoreIPs()">
+    Carica altri 500…
+  </button>
+  <span id="loadMoreInfo" style="margin-left:.75rem;font-size:11px;color:var(--text-muted)"></span>
+</div>
+
+<!-- Action bar (fixed bottom) -->
+<div id="bulkActionBar">
+  <div class="sel-info">
+    <span class="sel-count" id="selCount">0</span> righe selezionate
+  </div>
+  <div class="bar-spacer"></div>
+  <button class="btn btn-secondary btn-sm" onclick="clearSelection()">Annulla selezione</button>
+  <button class="btn btn-primary btn-sm" onclick="applyBulk()">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+    Applica ai selezionati
+  </button>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ─── Stato globale ───────────────────────────────────────────────
+var _tab       = 'supernet';      // supernet | subnet | ip
+var _allData   = [];              // tutti i record caricati
+var _filtered  = [];              // righe visibili dopo filtro
+var _selected  = new Set();       // id selezionati
+var _ipOffset  = 0;
+var _ipTotal   = 0;
+var _debTimer  = null;
+
+// ─── Configurazione colonne ──────────────────────────────────────
+const NET_COLS = [
+  { key:'name',         label:'Nome',         editable:true  },
+  { key:'address',      label:'Indirizzo',    editable:false, render: r => r.address+'/'+r.cidr },
+  { key:'network_type', label:'Tipo',         editable:true  },
+  { key:'vlan_id',      label:'VLAN',         editable:true  },
+  { key:'location',     label:'Location',     editable:true  },
+  { key:'country',      label:'Country',      editable:true  },
+  { key:'site',         label:'Site',         editable:true  },
+  { key:'usage',        label:'Usage',        editable:true  },
+  { key:'zone',         label:'Zone',         editable:true  },
+  { key:'gateway',      label:'Gateway',      editable:true  },
+  { key:'status',       label:'Status',       editable:true  },
+];
+
+const IP_COLS = [
+  { key:'ip_address',  label:'Indirizzo IP', editable:false },
+  { key:'hostname',    label:'Hostname',     editable:true  },
+  { key:'mac_address', label:'MAC',          editable:true  },
+  { key:'device_type', label:'Dispositivo',  editable:true  },
+  { key:'status',      label:'Status',       editable:true  },
+  { key:'description', label:'Descrizione',  editable:true  },
+];
+
+function getCols() { return _tab === 'ip' ? IP_COLS : NET_COLS; }
+
+// ─── Cambio tab ──────────────────────────────────────────────────
+function switchTab(tab) {
+  _tab = tab;
+  _allData = []; _filtered = []; _selected.clear(); _ipOffset = 0;
+  document.querySelectorAll('.bulk-tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  buildHeader();
+  updateActionBar();
+  loadData();
+}
+
+// ─── Header & input-row ─────────────────────────────────────────
+function buildHeader() {
+  const cols = getCols();
+  const thead = document.getElementById('bulkHead');
+
+  // Riga intestazioni
+  let hRow = '<tr>';
+  hRow += '<th><input type="checkbox" id="chkAll" onchange="selectAll(this.checked)" title="Seleziona tutto"></th>';
+  cols.forEach(c => { hRow += `<th>${c.label}</th>`; });
+  hRow += '</tr>';
+
+  // Riga input (filter / bulk-edit)
+  let iRow = '<tr class="input-row" id="inputRow">';
+  iRow += '<td><span class="mode-badge filter" id="inputModeBadge">🔍</span></td>';
+  cols.forEach(c => {
+    const editCls = c.editable ? 'editable' : '';
+    iRow += `<td><input type="text" class="bulk-input ${editCls}"
+      id="inp_${c.key}" data-key="${c.key}" data-editable="${c.editable}"
+      placeholder="${c.editable ? c.label : '🔍 '+c.label}"
+      oninput="onInputChange()" onkeydown="if(event.key==='Enter')applyFilters()"></td>`;
+  });
+  iRow += '</tr>';
+
+  thead.innerHTML = hRow + iRow;
+}
+
+// ─── Caricamento dati ────────────────────────────────────────────
+async function loadData() {
+  document.getElementById('bulkBody').innerHTML =
+    '<tr><td colspan="99" class="bulk-loading">Caricamento…</td></tr>';
+  document.getElementById('loadMoreBar').style.display = 'none';
+
+  if (_tab === 'ip') {
+    await fetchIPs(0, true);
+  } else {
+    const resp = await fetch(`/ipam/api/networks?type=${_tab}`);
+    _allData   = await resp.json();
+    document.getElementById('cnt-' + _tab).textContent = _allData.length;
+    applyFilters();
+  }
+}
+
+// ─── IP: caricamento paginato ────────────────────────────────────
+async function fetchIPs(offset, reset) {
+  const q      = getFilterParams();
+  const params = new URLSearchParams({limit:500, offset, ...q});
+  const resp   = await fetch('/ipam/api/ip-records?' + params);
+  const json   = await resp.json();
+  if (reset) { _allData = []; _selected.clear(); }
+  _allData    = _allData.concat(json.items);
+  _ipOffset   = _allData.length;
+  _ipTotal    = json.total;
+  document.getElementById('cnt-ip').textContent = _ipTotal;
+  _filtered = [..._allData];
+  renderRows();
+  updateLoadMore();
+}
+
+function loadMoreIPs() { fetchIPs(_ipOffset, false); }
+
+function updateLoadMore() {
+  const bar = document.getElementById('loadMoreBar');
+  const info = document.getElementById('loadMoreInfo');
+  if (_tab === 'ip' && _ipOffset < _ipTotal) {
+    bar.style.display = 'block';
+    info.textContent  = `${_ipOffset} di ${_ipTotal} caricati`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+// ─── Filtro ──────────────────────────────────────────────────────
+function getFilterParams() {
+  const params = {};
+  getCols().forEach(c => {
+    const v = (document.getElementById('inp_'+c.key)||{}).value || '';
+    if (v.trim()) {
+      if (c.key === 'status') params.status = v.trim();
+      else params.q = v.trim();
+    }
+  });
+  return params;
+}
+
+function onInputChange() {
+  if (_selected.size > 0) return;    // in modalità edit non filtriamo
+  clearTimeout(_debTimer);
+  _debTimer = setTimeout(() => {
+    if (_tab === 'ip') {
+      _allData = []; _ipOffset = 0;
+      fetchIPs(0, true);
+    } else {
+      applyFilters();
+    }
+  }, 300);
+}
+
+function applyFilters() {
+  if (_tab === 'ip') return;          // IP: filtro server-side
+  const vals = {};
+  getCols().forEach(c => {
+    const el = document.getElementById('inp_'+c.key);
+    if (el) vals[c.key] = el.value.trim().toLowerCase();
+  });
+  _filtered = _allData.filter(row => {
+    return getCols().every(c => {
+      const v = vals[c.key];
+      if (!v) return true;
+      let cell = c.render ? c.render(row) : (row[c.key] ?? '');
+      return String(cell).toLowerCase().includes(v);
+    });
+  });
+  renderRows();
+}
+
+// ─── Rendering righe ─────────────────────────────────────────────
+function renderRows() {
+  const cols  = getCols();
+  const tbody = document.getElementById('bulkBody');
+  const rows  = _tab === 'ip' ? _allData : _filtered;
+
+  document.getElementById('rowCountInfo').textContent =
+    `${rows.length} ${_tab === 'ip' ? ('record su ' + _ipTotal) : 'risultati'}`;
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="99">Nessun risultato</td></tr>';
+    return;
+  }
+
+  let html = '';
+  rows.forEach(row => {
+    const sel  = _selected.has(row.id);
+    const cls  = sel ? 'data-row selected' : 'data-row';
+    html += `<tr class="${cls}" data-id="${row.id}">`;
+    html += `<td><input type="checkbox" ${sel?'checked':''} onchange="toggleRow(${row.id},this.checked)"></td>`;
+    cols.forEach(c => {
+      const val  = c.render ? c.render(row) : (row[c.key] ?? '—');
+      const disp = (val === '' || val === null || val === undefined) ? '—' : val;
+      const cls2 = (c.key === 'address' || c.key === 'ip_address') ? 'col-mono' : '';
+      html += `<td class="${cls2}">${escHtml(String(disp))}</td>`;
+    });
+    html += '</tr>';
+  });
+  tbody.innerHTML = html;
+  syncChkAll();
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Selezione ───────────────────────────────────────────────────
+function toggleRow(id, checked) {
+  if (checked) _selected.add(id); else _selected.delete(id);
+  const tr = document.querySelector(`tr[data-id="${id}"]`);
+  if (tr) tr.classList.toggle('selected', checked);
+  updateActionBar();
+}
+
+function selectAll(checked) {
+  const rows = _tab === 'ip' ? _allData : _filtered;
+  rows.forEach(r => { if (checked) _selected.add(r.id); else _selected.delete(r.id); });
+  renderRows();
+  updateActionBar();
+}
+
+function clearSelection() {
+  _selected.clear();
+  renderRows();
+  updateActionBar();
+}
+
+function syncChkAll() {
+  const chk  = document.getElementById('chkAll');
+  if (!chk) return;
+  const rows = _tab === 'ip' ? _allData : _filtered;
+  chk.checked = rows.length > 0 && rows.every(r => _selected.has(r.id));
+  chk.indeterminate = !chk.checked && rows.some(r => _selected.has(r.id));
+}
+
+// ─── Action bar & modalità ───────────────────────────────────────
+function updateActionBar() {
+  const n    = _selected.size;
+  const bar  = document.getElementById('bulkActionBar');
+  const badge= document.getElementById('modeBadge');
+  const inputBadge = document.getElementById('inputModeBadge');
+  const inputRow   = document.getElementById('inputRow');
+
+  document.getElementById('selCount').textContent = n;
+
+  if (n > 0) {
+    bar.classList.add('visible');
+    badge.className    = 'mode-badge edit';
+    badge.textContent  = '✏️ Modifica bulk';
+    if (inputBadge) { inputBadge.className = 'mode-badge edit'; inputBadge.textContent = '✏️'; }
+    if (inputRow)   inputRow.classList.add('mode-edit');
+  } else {
+    bar.classList.remove('visible');
+    badge.className    = 'mode-badge filter';
+    badge.textContent  = '🔍 Modalità filtro';
+    if (inputBadge) { inputBadge.className = 'mode-badge filter'; inputBadge.textContent = '🔍'; }
+    if (inputRow)   inputRow.classList.remove('mode-edit');
+  }
+}
+
+// ─── Applica modifiche bulk ──────────────────────────────────────
+async function applyBulk() {
+  if (_selected.size === 0) return;
+
+  const fields = {};
+  getCols().forEach(c => {
+    if (!c.editable) return;
+    const el = document.getElementById('inp_'+c.key);
+    if (el && el.value.trim() !== '') fields[c.key] = el.value.trim();
+  });
+
+  if (Object.keys(fields).length === 0) {
+    showToast('Compila almeno un campo nella riga di modifica', 'error');
+    return;
+  }
+
+  const ids      = [..._selected];
+  const endpoint = _tab === 'ip'
+    ? '/ipam/api/bulk-edit/ip-records'
+    : '/ipam/api/bulk-edit/networks';
+
+  const resp = await apiFetch(endpoint, {
+    method: 'PUT',
+    body: JSON.stringify({ ids, fields })
+  });
+
+  showToast(`${resp.updated} record aggiornati`, 'success');
+
+  // Aggiorna la visualizzazione locale
+  const rows = _tab === 'ip' ? _allData : _allData;
+  ids.forEach(id => {
+    const row = rows.find(r => r.id === id);
+    if (row) Object.assign(row, fields);
+  });
+
+  clearSelection();
+  if (_tab !== 'ip') applyFilters(); else renderRows();
+}
+
+// ─── Conteggi tab ────────────────────────────────────────────────
+async function loadCounts() {
+  const [sn, sub] = await Promise.all([
+    fetch('/ipam/api/networks?type=supernet').then(r=>r.json()),
+    fetch('/ipam/api/networks?type=subnet').then(r=>r.json()),
+  ]);
+  document.getElementById('cnt-supernet').textContent = sn.length;
+  document.getElementById('cnt-subnet').textContent   = sub.length;
+  // IP count arriverà al primo caricamento
+}
+
+// ─── Init ────────────────────────────────────────────────────────
+buildHeader();
+loadData();
+loadCounts();
+</script>
+{% endblock %}

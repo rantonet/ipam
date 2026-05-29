@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="it" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — IPAM</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <style>
+    body { margin:0; display:flex; align-items:center; justify-content:center;
+           min-height:100vh; background:var(--bg-primary); }
+    .login-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2.4rem 2.8rem;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.45);
+    }
+    .login-brand {
+      display: flex; align-items: center; gap: .75rem;
+      margin-bottom: 2rem;
+    }
+    .login-brand-icon {
+      width: 40px; height: 40px; border-radius: 9px;
+      background: var(--accent); display: flex; align-items: center;
+      justify-content: center; font-weight: 800; font-size: 14px;
+      color: #fff; font-family: monospace; flex-shrink: 0;
+    }
+    .login-brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+    .login-brand-name { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
+    .login-brand-sub  { font-size: .75rem; color: var(--text-muted); }
+    .login-title { font-size: 1.1rem; font-weight: 600; margin: 0 0 1.4rem;
+                   color: var(--text-primary); }
+    .login-field { display: flex; flex-direction: column; gap: .3rem; margin-bottom: 1rem; }
+    .login-field label { font-size: .8rem; color: var(--text-muted); }
+    .login-field input { font-size: .95rem; }
+    .login-error {
+      background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.35);
+      border-radius: 6px; padding: .55rem .8rem;
+      color: #f85149; font-size: .83rem; margin-bottom: 1rem;
+      display: flex; align-items: center; gap: .4rem;
+    }
+    .login-btn {
+      width: 100%; padding: .65rem;
+      font-size: .95rem; font-weight: 600;
+      margin-top: .4rem;
+    }
+    .login-footer {
+      margin-top: 1.6rem; text-align: center;
+      font-size: .75rem; color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+<div class="login-card">
+  <div class="login-brand">
+    <div class="login-brand-icon">IP</div>
+    <div class="login-brand-text">
+      <span class="login-brand-name">IPAM</span>
+      <span class="login-brand-sub">Network Manager</span>
+    </div>
+  </div>
+
+  <h2 class="login-title">Accedi</h2>
+
+  {% if error %}
+  <div class="login-error">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+    </svg>
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('auth_login', next=request.args.get('next','')) }}">
+    <div class="login-field">
+      <label for="username">Nome utente</label>
+      <input id="username" name="username" type="text" class="form-control"
+             placeholder="es. admin" autocomplete="username" autofocus
+             value="{{ request.form.get('username','') }}">
+    </div>
+    <div class="login-field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" class="form-control"
+             placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn btn-primary login-btn">Entra</button>
+  </form>
+
+  <div class="login-footer">
+    IPAM v{{ version }} &mdash; phoenix.loc
+  </div>
+</div>
+</body>
+</html>

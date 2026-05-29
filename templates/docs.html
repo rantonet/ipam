@@ -1,0 +1,640 @@
+{% extends "base.html" %}
+{% block title %}Documentazione{% endblock %}
+
+{% block page_title %}
+<div class="page-title">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+  Documentazione
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="docs-layout">
+
+  <div class="docs-nav">
+    <div class="docs-nav-title">Contenuto</div>
+    <a href="#overview" class="active">Panoramica</a>
+    <a href="#architecture">Architettura</a>
+    <a href="#apache">Installazione</a>
+    <a href="#apache-conf">↳ ipam.conf</a>
+    <a href="#apache-steps">↳ Passi installazione</a>
+    <a href="#venv">↳ Virtualenv Python</a>
+    <a href="#models">Modello Dati</a>
+    <a href="#pages">Pagine</a>
+    <a href="#api">API REST</a>
+    <a href="#api-networks">↳ Networks</a>
+    <a href="#api-ips">↳ IP Records</a>
+    <a href="#api-vlans">↳ VLANs</a>
+    <a href="#api-stats">↳ Stats</a>
+    <a href="#api-bulk">↳ Bulk Edit</a>
+    <a href="#api-settings">↳ Impostazioni</a>
+    <a href="#api-scan-groups">↳ Gruppi Scan</a>
+    <a href="#scanner">Scanner</a>
+    <a href="#scheduler">Scheduler</a>
+    <a href="#scripts">Script Utility</a>
+    <a href="#changelog">Changelog</a>
+  </div>
+
+  <div class="docs-content">
+
+    <h2 id="overview">Panoramica</h2>
+    <p>
+      <strong>IPAM</strong> (IP Address Management) è un'applicazione web sviluppata in
+      Python 3 / Flask per la gestione degli spazi di indirizzamento IP, delle subnet e
+      delle VLAN aziendali. In produzione gira su <strong>Gunicorn</strong> (porta 8000)
+      dietro <strong>Apache 2.4</strong> come reverse proxy nella directory dedicata <code>/ipam</code>.
+    </p>
+    <p>
+      L'URL di accesso è <code>http://&lt;server&gt;/ipam/</code>. Il prefisso viene
+      gestito dal middleware <code>ReverseProxied</code> in <code>wsgi_gunicorn.py</code>:
+      tutti i link interni generati da <code>url_for()</code> includono già <code>/ipam</code>.
+    </p>
+
+    <h2 id="architecture">Architettura</h2>
+    <h3>Stack Tecnologico</h3>
+    <ul>
+      <li><strong>Backend:</strong> Python 3 · Flask · Flask-SQLAlchemy · Flask-Login · Werkzeug</li>
+      <li><strong>Web server:</strong> Apache 2.4 (reverse proxy) → Gunicorn :8000 (WSGI)</li>
+      <li><strong>Database:</strong> SQLite — file <code>instance/ipam.db</code></li>
+      <li><strong>Frontend:</strong> HTML5 · CSS3 separato · JavaScript vanilla</li>
+      <li><strong>Font:</strong> IBM Plex Mono + IBM Plex Sans</li>
+      <li><strong>Dipendenze principali:</strong> <code>flask</code>, <code>flask-sqlalchemy</code>, <code>flask-login</code>, <code>werkzeug</code>, <code>gunicorn</code>, <code>dnspython</code>, <code>apscheduler</code>, <code>ldap3</code></li>
+    </ul>
+
+    <h3>Struttura File</h3>
+    <pre><code>/var/www/html/ipam/           ← root installazione
+├── app.py                    # Applicazione Flask (modelli, route, API)
+├── wsgi_gunicorn.py          # Entry point Gunicorn + middleware ReverseProxied
+├── main.py                   # Entry point sviluppo locale (porta 5000)
+├── scanner.py                # Scanner IP (ping + DNS PTR + SNMP ARP)
+├── fill_missing_ips.py       # Utility: popolamento IP mancanti nelle subnet
+├── install.sh                # Script installazione automatica (Debian + RHEL)
+├── update.sh                 # Script aggiornamento sicuro (preserva il DB)
+├── static/
+│   └── css/
+│       └── main.css          # Foglio di stile (servito direttamente da Apache)
+├── templates/
+│   ├── base.html             # Layout base (sidebar, topbar, nav)
+│   ├── index.html            # Dashboard
+│   ├── networks.html         # Lista reti
+│   ├── network_detail.html   # Dettaglio rete + IP con sort e vista used/free/all
+│   ├── ip_addresses.html     # Lista globale IP con filtri per colonna e sort
+│   ├── vlans.html            # Gestione VLAN
+│   ├── bulk_edit.html        # Modifica bulk reti/IP
+│   ├── settings.html         # Impostazioni DNS, LDAP, SNMP, utenti, scan
+│   ├── logs.html             # Log scansioni e SNMP discovery
+│   └── docs.html             # Questa pagina
+└── instance/
+    ├── ipam.db               # Database SQLite (permessi 640, owner www-data)
+    └── scheduler.lock        # Lock file APScheduler (creato a runtime)</code></pre>
+
+    <h2 id="apache">Installazione</h2>
+    <p>
+      L'applicazione gira su <strong>Debian · Ubuntu · RHEL · Rocky Linux · AlmaLinux · CentOS · Fedora</strong>.
+      Lo script <code>install.sh</code> rileva automaticamente la famiglia della distribuzione,
+      installa le dipendenze, crea il servizio <code>systemd</code> per Gunicorn e configura Apache come reverse proxy.
+    </p>
+    <p>
+      Architettura di rete: <code>Browser → Apache :80 → ProxyPass → Gunicorn :8000 → Flask</code>
+    </p>
+
+    <h3 id="apache-conf">File <code>ipam.conf</code></h3>
+    <p>
+      Generato automaticamente da <code>install.sh</code> nella directory corretta per la distro:
+    </p>
+    <ul>
+      <li><strong>Debian / Ubuntu:</strong> <code>/etc/apache2/conf-available/ipam.conf</code></li>
+      <li><strong>RHEL / Rocky / Alma / CentOS / Fedora:</strong> <code>/etc/httpd/conf.d/ipam.conf</code></li>
+    </ul>
+    <pre><code># File statici serviti direttamente da Apache (più veloce)
+Alias /ipam/static /var/www/html/ipam/static
+&lt;Directory /var/www/html/ipam/static&gt;
+    Options -Indexes
+    AllowOverride None
+    Require all granted
+&lt;/Directory&gt;
+
+# Proteggi il database SQLite
+&lt;Directory /var/www/html/ipam/instance&gt;
+    Require all denied
+&lt;/Directory&gt;
+
+# Reverse proxy verso Gunicorn
+ProxyPass        /ipam/static !
+ProxyPass        /ipam  http://127.0.0.1:8000/ipam
+ProxyPassReverse /ipam  http://127.0.0.1:8000/ipam</code></pre>
+
+    <p>
+      Aggiungere nel VirtualHost (o in <code>httpd.conf</code>) per il corretto forwarding degli header:
+    </p>
+    <pre><code>ProxyPreserveHost On
+RequestHeader set X-Forwarded-Host %{HTTP_HOST}s
+RequestHeader set X-Forwarded-Proto %{REQUEST_SCHEME}s</code></pre>
+
+    <h3>File di servizio <code>systemd</code></h3>
+    <p>
+      Il servizio usa Gunicorn installato nel virtualenv dedicato (<code>venv/</code>)
+      creato dallo script <code>install.sh</code> nella directory dell'applicazione.
+    </p>
+    <pre><code>[Unit]
+Description=IPAM Gunicorn service
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/var/www/html/ipam
+ExecStart=/var/www/html/ipam/venv/bin/gunicorn --bind 127.0.0.1:8000 --workers 1 --timeout 120 wsgi_gunicorn:application
+Restart=always
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+    <pre><code>sudo systemctl restart ipam   # riavvia dopo ogni aggiornamento</code></pre>
+
+    <h3 id="apache-steps">Passi di installazione</h3>
+    <ol>
+      <li>
+        <strong>Installazione automatica (consigliata)</strong> — lo script rileva
+        da solo la famiglia della distro, crea un <strong>virtualenv Python</strong>
+        in <code>/var/www/html/ipam/venv/</code>, installa le dipendenze da
+        <code>requirements.txt</code>, crea il servizio Gunicorn e configura Apache:
+        <pre><code>sudo chmod +x /sorgente/ipam/install.sh
+sudo /sorgente/ipam/install.sh</code></pre>
+      </li>
+      <li>
+        <strong>Aggiornamento</strong> — usa <code>update.sh</code> che preserva il database
+        e aggiorna le dipendenze Python nel venv:
+        <pre><code>sudo chmod +x /sorgente/ipam/update.sh
+sudo /sorgente/ipam/update.sh</code></pre>
+      </li>
+    </ol>
+    <p>
+      Dopo l'installazione l'applicazione è raggiungibile su
+      <code>http://&lt;IP-server&gt;/ipam/</code>.
+      Le credenziali predefinite sono <code>admin</code> / <code>admin</code> (cambiarle subito dalla pagina Impostazioni).
+    </p>
+
+    <h3>SELinux — nota importante</h3>
+    <p>
+      Su RHEL e derivate SELinux è in modalità <strong>enforcing</strong> per default.
+      Senza i contesti corretti Apache non riesce a leggere i file Python né a scrivere
+      il database SQLite. I due contesti necessari sono:
+    </p>
+    <ul>
+      <li><code>httpd_sys_content_t</code> — lettura dei file sorgente, template, CSS</li>
+      <li><code>httpd_sys_rw_content_t</code> — lettura <em>e scrittura</em> della directory <code>instance/</code> (richiesto da SQLite)</li>
+    </ul>
+    <p>
+      Lo script <code>install.sh</code> applica entrambi automaticamente tramite
+      <code>semanage</code> + <code>restorecon</code>.
+    </p>
+
+    <h3>Come funziona il prefisso <code>/ipam</code></h3>
+    <p>
+      Apache trasferisce le richieste a Gunicorn con header <code>X-Forwarded-Host</code>.
+      Il middleware <code>ReverseProxied</code> in <code>wsgi_gunicorn.py</code> ripristina
+      l'hostname originale e imposta <code>SCRIPT_NAME=/ipam</code>.
+      Flask legge <code>SCRIPT_NAME</code> e lo include automaticamente in ogni
+      URL generato da <code>url_for()</code>, quindi non è necessario hardcodare
+      <code>/ipam</code> in nessun template.
+    </p>
+
+    <h2 id="venv">Virtualenv Python</h2>
+    <p>
+      L'applicazione usa un <strong>virtualenv Python dedicato</strong> (<code>venv/</code>)
+      nella directory di installazione, in modo da isolare le dipendenze dal sistema operativo
+      e rendere l'aggiornamento dei pacchetti sicuro e riproducibile.
+    </p>
+
+    <h3>Creare il virtualenv manualmente</h3>
+    <p>
+      Lo script <code>install.sh</code> crea e popola il venv automaticamente.
+      Se si rende necessario ricrearlo da zero (es. cambio di versione Python, venv corrotto):
+    </p>
+    <pre><code>cd /var/www/html/ipam
+
+# Rimuovere il venv esistente (opzionale ma consigliato se corrotto)
+sudo rm -rf venv
+
+# Creare un nuovo venv con il Python di sistema
+sudo python3 -m venv venv
+
+# Installare tutte le dipendenze
+sudo venv/bin/pip install --upgrade pip
+sudo venv/bin/pip install -r requirements.txt
+
+# Correggere i permessi (www-data deve poter leggere il venv)
+sudo chown -R root:www-data venv/
+sudo chmod -R 750 venv/</code></pre>
+
+    <h3>Installare o aggiornare le dipendenze</h3>
+    <p>
+      Ogni volta che <code>requirements.txt</code> viene modificato (nuova dipendenza o aggiornamento
+      di versione), è necessario sincronizzare il venv:
+    </p>
+    <pre><code>cd /var/www/html/ipam
+sudo venv/bin/pip install -r requirements.txt
+sudo systemctl restart ipam</code></pre>
+    <p>
+      Per aggiornare tutti i pacchetti all'ultima versione compatibile con i vincoli dichiarati:
+    </p>
+    <pre><code>sudo venv/bin/pip install --upgrade -r requirements.txt
+sudo systemctl restart ipam</code></pre>
+
+    <h3>Verificare i pacchetti installati</h3>
+    <p>
+      Per controllare cosa è installato nel venv e le versioni effettive:
+    </p>
+    <pre><code>sudo venv/bin/pip list</code></pre>
+    <p>
+      Per confrontare i pacchetti installati con quelli dichiarati in <code>requirements.txt</code>
+      e individuare dipendenze mancanti o obsolete:
+    </p>
+    <pre><code>sudo venv/bin/pip install --dry-run -r requirements.txt</code></pre>
+    <p>
+      Per vedere quale versione di Python usa il venv:
+    </p>
+    <pre><code>venv/bin/python --version</code></pre>
+
+    <h3>Dipendenze dichiarate (<code>requirements.txt</code>)</h3>
+    <table class="docs-table">
+      <thead>
+        <tr><th>Pacchetto</th><th>Versione minima</th><th>Utilizzo</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>flask</code></td><td>&gt;= 2.3</td><td>Framework web</td></tr>
+        <tr><td><code>flask-sqlalchemy</code></td><td>&gt;= 3.0</td><td>ORM per SQLite</td></tr>
+        <tr><td><code>flask-login</code></td><td>&gt;= 0.6</td><td>Gestione sessioni utente</td></tr>
+        <tr><td><code>werkzeug</code></td><td>&gt;= 2.3</td><td>Utilità HTTP / hashing password</td></tr>
+        <tr><td><code>gunicorn</code></td><td>&gt;= 21.0</td><td>Server WSGI produzione</td></tr>
+        <tr><td><code>dnspython</code></td><td>&gt;= 2.4</td><td>Risoluzione DNS PTR nello scanner</td></tr>
+        <tr><td><code>apscheduler</code></td><td>&gt;= 3.10</td><td>Scheduler scansioni periodiche</td></tr>
+        <tr><td><code>ldap3</code></td><td>&gt;= 2.9</td><td>Autenticazione LDAP / Active Directory</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Quando aggiornare il venv</h3>
+    <ul>
+      <li>Dopo ogni <strong>pull / deploy</strong> che modifica <code>requirements.txt</code></li>
+      <li>Quando il servizio si avvia ma produce errori <code>ModuleNotFoundError</code> o <code>ImportError</code></li>
+      <li>Dopo aver eseguito <code>update.sh</code> (lo script aggiorna già il venv in automatico)</li>
+      <li>Quando si cambia la versione di Python sul server (il venv va ricreato da zero)</li>
+    </ul>
+    <p>
+      <strong>Nota:</strong> il servizio systemd <code>ipam</code> punta direttamente all'eseguibile
+      <code>venv/bin/gunicorn</code>. Dopo qualsiasi modifica al venv è sempre necessario
+      riavviare il servizio con <code>sudo systemctl restart ipam</code>.
+    </p>
+
+    <h2 id="models">Modello Dati</h2>
+
+    <h3>Network</h3>
+    <ul>
+      <li><code>address / cidr</code> — es. <code>10.122.0.0 / 19</code></li>
+      <li><code>name</code> — nome descrittivo</li>
+      <li><code>network_type</code> — <code>supernet</code> | <code>subnet</code></li>
+      <li><code>parent_id</code> — FK ricorsiva per gerarchia supernet → subnet</li>
+      <li><code>status</code> — <code>active</code> | <code>reserved</code> | <code>deprecated</code></li>
+      <li><code>location, country, site, usage, zone, gateway</code> — metadati opzionali</li>
+      <li><code>vlan_id</code> — FK verso <code>vlans</code></li>
+    </ul>
+    <p>Proprietà calcolate: <code>total_hosts</code>, <code>used_count</code>, <code>available_count</code>, <code>usage_percent</code>, <code>broadcast</code>, <code>netmask</code>.</p>
+
+    <h3>IPRecord</h3>
+    <ul>
+      <li><code>ip_address</code> — stringa univoca (es. <code>10.0.0.1</code>)</li>
+      <li><code>ip_int</code> — rappresentazione intera a 32 bit dell'IPv4 — usata per l'ordinamento O(log n) tramite indice B-tree</li>
+      <li><code>hostname</code> — nome host risolto via DNS PTR</li>
+      <li><code>mac_address</code> — indirizzo MAC</li>
+      <li><code>switch_name</code> — nome switch rilevato via SNMP</li>
+      <li><code>switch_port</code> — numero porta switch</li>
+      <li><code>snmp_updated_at</code> — timestamp ultimo aggiornamento SNMP</li>
+      <li><code>device_type</code> — server | workstation | router | switch | printer | ap | phone | other</li>
+      <li><code>os_type</code> — sistema operativo (testo libero)</li>
+      <li><code>status</code> — <code>used</code> | <code>reserved</code> | <code>dhcp</code> | <code>available</code></li>
+      <li><code>network_id</code> — FK verso <code>networks</code></li>
+      <li><code>description</code> — note libere</li>
+      <li><code>last_seen</code> — timestamp ultimo rilevamento attivo</li>
+    </ul>
+    <p>
+      <strong>Indici DB:</strong> <code>ip_int</code>, <code>network_id</code>, <code>network_id+status</code>,
+      <code>status</code>, <code>device_type</code>, <code>switch_name</code>, <code>os_type</code>, <code>last_seen</code>.
+      Tutti creati automaticamente all'avvio da <code>_ensure_indexes()</code>.
+    </p>
+
+    <h3>VLan</h3>
+    <ul>
+      <li><code>vlan_id</code> — 1–4094, univoco</li>
+      <li><code>name</code> — nome descrittivo</li>
+      <li><code>status</code> — <code>active</code> | <code>deprecated</code></li>
+    </ul>
+
+    <h3>LocalUser</h3>
+    <ul>
+      <li><code>username</code> — univoco</li>
+      <li><code>password_hash</code> — hash bcrypt</li>
+      <li><code>is_admin</code> — booleano (almeno un admin deve sempre esistere)</li>
+    </ul>
+
+    <h3>AppConfig</h3>
+    <p>Tabella chiave-valore per la configurazione persistente.</p>
+    <ul>
+      <li><code>dns_primary</code>, <code>dns_secondary</code> — server DNS per PTR lookup</li>
+      <li><code>global_scan_enabled</code>, <code>global_scan_time</code> — scansione globale schedulata</li>
+      <li><code>ldap_*</code> — configurazione LDAP / Active Directory</li>
+      <li><code>snmp_community</code>, <code>snmp_routers</code> — configurazione SNMP</li>
+    </ul>
+
+    <h3>ScanGroup / ScanGroupItem</h3>
+    <p>Gruppi di scansione pianificata con orario dedicato.</p>
+    <ul>
+      <li><code>group_type</code> — <code>supernet</code> | <code>subnet</code> | <code>ip_range</code></li>
+      <li><code>schedule_time</code> — orario HH:MM di esecuzione giornaliera</li>
+      <li>Ogni item punta a una <code>network_id</code> o a un <code>ip_range</code> CIDR testuale</li>
+    </ul>
+
+    <h3>ScanLog</h3>
+    <p>Registro automatico di ogni scansione e SNMP discovery.</p>
+    <ul>
+      <li><code>scan_type</code> — <code>subnet</code> | <code>snmp</code> | <code>group</code></li>
+      <li><code>target</code> — subnet CIDR o IP router oggetto della scansione</li>
+      <li><code>started_at</code>, <code>ended_at</code>, <code>duration</code> — timing</li>
+      <li><code>found</code>, <code>updated</code>, <code>errors</code> — contatori risultati</li>
+      <li><code>status</code> — <code>running</code> | <code>done</code> | <code>error</code></li>
+    </ul>
+
+    <h2 id="pages">Pagine</h2>
+    <ul>
+      <li><code>/ipam/</code> — Dashboard con statistiche globali (reti, IP, utilizzo %)</li>
+      <li><code>/ipam/networks</code> — Lista reti con filtri, paginazione e albero gerarchico</li>
+      <li><code>/ipam/networks/&lt;id&gt;</code> — Dettaglio rete: subnet figlie, lista IP con sort su tutte le colonne, vista <em>Solo occupati / Solo liberi / Tutta la subnet</em>, scan in-page</li>
+      <li><code>/ipam/ip-addresses</code> — Lista globale IP con ordinamento su tutte le colonne e filtri per Stato, Tipo Dispositivo, OS, Switch e Rete</li>
+      <li><code>/ipam/vlans</code> — Gestione VLAN (crea, modifica, elimina)</li>
+      <li><code>/ipam/bulk-edit</code> — Modifica bulk di supernet, subnet e indirizzi IP</li>
+      <li><code>/ipam/settings</code> — Impostazioni DNS, scansione globale, gruppi di scan, LDAP/AD, SNMP Discovery, utenti locali</li>
+      <li><code>/ipam/logs</code> — Log scansioni e SNMP discovery con auto-refresh</li>
+      <li><code>/ipam/docs</code> — Questa documentazione</li>
+    </ul>
+
+    <h2 id="api">API REST</h2>
+    <p>Tutti gli endpoint sono sotto <code>/ipam/api/</code> e restituiscono JSON. Richiedono autenticazione (cookie di sessione o Basic Auth).</p>
+
+    <h3 id="api-networks">Networks</h3>
+    <div class="api-endpoint"><span class="method-get">GET</span> <code>/ipam/api/networks</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">?type=supernet|subnet &amp;q=testo</span></div>
+    <p style="color:var(--text-muted);font-size:.84rem;margin:.3rem 0 .6rem 0">
+      Lista leggera senza proprietà calcolate — ottimizzata con SQL diretto.
+      Filtra per tipo con <code>type</code> e per testo libero con <code>q</code> (nome, indirizzo, location, country, site, usage, zone, gateway).
+    </p>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/networks/tree</code></div>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/networks/tree/invalidate</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">forza aggiornamento cache albero</span></div>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/networks</code></div>
+    <div class="api-endpoint"><span class="method-put">PUT</span>    <code>/ipam/api/networks/&lt;id&gt;</code></div>
+    <div class="api-endpoint"><span class="method-delete">DELETE</span> <code>/ipam/api/networks/&lt;id&gt;</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">?force=1 per eliminare anche gli IP</span></div>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/networks/&lt;id&gt;/scan</code></div>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/networks/&lt;id&gt;/scan/status</code></div>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/scan/status</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">stato di tutti gli scan in corso</span></div>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/scan/test-ip</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">?ip=10.0.0.1 — testa ping+DNS su un singolo IP</span></div>
+
+    <h3 id="api-ips">IP Records</h3>
+    <div class="api-endpoint"><span class="method-get">GET</span> <code>/ipam/api/ip-records</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">?network_id=N &amp;q=testo &amp;status=used|… &amp;limit=500 &amp;offset=0</span></div>
+    <p style="color:var(--text-muted);font-size:.84rem;margin:.3rem 0 .4rem 0">Risposta paginata:</p>
+    <pre><code>{ "total": 159218, "items": [ { "id": 1, "ip_address": "10.112.1.1", "ip_int": 169869569, ... } ] }</code></pre>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/ip-records</code></div>
+    <div class="api-endpoint"><span class="method-put">PUT</span>    <code>/ipam/api/ip-records/&lt;id&gt;</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">modifica hostname, MAC, device_type, os_type, status, description</span></div>
+    <div class="api-endpoint"><span class="method-put">PUT</span>    <code>/ipam/api/ip-records/&lt;id&gt;/clear</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">azzera tutti i campi (hostname, MAC, ecc.) e imposta status=free</span></div>
+    <div class="api-endpoint"><span class="method-delete">DELETE</span> <code>/ipam/api/ip-records/&lt;id&gt;</code></div>
+
+    <h3 id="api-vlans">VLANs</h3>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/vlans</code></div>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/vlans</code></div>
+    <div class="api-endpoint"><span class="method-put">PUT</span>    <code>/ipam/api/vlans/&lt;id&gt;</code></div>
+    <div class="api-endpoint"><span class="method-delete">DELETE</span> <code>/ipam/api/vlans/&lt;id&gt;</code></div>
+
+    <h3 id="api-stats">Statistiche</h3>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/stats</code></div>
+    <pre><code>{
+  "total_networks": 828,
+  "total_subnets":  772,
+  "total_vlans":    14,
+  "total_ips":      159218,
+  "used_ips":       143290,
+  "reserved_ips":   1200,
+  "total_hosts":    201940,
+  "global_usage":   71.2
+}</code></pre>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/version</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">versione corrente + changelog</span></div>
+
+    <h3 id="api-bulk">Bulk Edit</h3>
+    <p style="color:var(--text-muted);font-size:.84rem;margin:.3rem 0 .6rem 0">
+      Modifica in blocco di più record con un'unica chiamata. Solo i campi presenti nel body vengono aggiornati.
+    </p>
+    <div class="api-endpoint"><span class="method-put">PUT</span> <code>/ipam/api/bulk-edit/networks</code></div>
+    <pre><code>Body: { "ids": [1, 2, 3], "fields": { "location": "Milano", "zone": "A" } }</code></pre>
+    <div class="api-endpoint"><span class="method-put">PUT</span> <code>/ipam/api/bulk-edit/ip-records</code></div>
+    <pre><code>Body: { "ids": [10, 11, 12], "fields": { "status": "reserved", "device_type": "server" } }</code></pre>
+
+    <h3 id="api-settings">Impostazioni</h3>
+    <div class="api-endpoint"><span class="method-get">GET</span> <code>/ipam/api/settings</code></div>
+    <pre><code>{
+  "dns_primary":         "192.168.1.1",
+  "dns_secondary":       "192.168.1.2",
+  "global_scan_enabled": false,
+  "global_scan_time":    "02:00"
+}</code></pre>
+    <div class="api-endpoint"><span class="method-put">PUT</span> <code>/ipam/api/settings</code></div>
+    <p style="color:var(--text-muted);font-size:.84rem;margin:.3rem 0 .6rem 0">Aggiorna DNS nel modulo scanner a runtime e ricarica lo scheduler.</p>
+    <div class="api-endpoint"><span class="method-get">GET</span> <code>/ipam/api/settings/dns/test</code></div>
+    <p style="color:var(--text-muted);font-size:.84rem;margin:.3rem 0 .6rem 0">Testa la raggiungibilità dei server DNS eseguendo un PTR lookup reale su <code>8.8.8.8</code>.</p>
+
+    <div class="api-endpoint"><span class="method-get">GET</span>  <code>/ipam/api/settings/ldap</code></div>
+    <div class="api-endpoint"><span class="method-put">PUT</span>  <code>/ipam/api/settings/ldap</code></div>
+    <div class="api-endpoint"><span class="method-post">POST</span> <code>/ipam/api/settings/ldap/test</code></div>
+    <p style="color:var(--text-muted);font-size:.84rem;margin:.3rem 0 .6rem 0">Test autenticazione LDAP completo: ricerca utente, verifica password, controllo gruppo diretto e annidato.</p>
+
+    <div class="api-endpoint"><span class="method-get">GET</span>  <code>/ipam/api/settings/snmp</code></div>
+    <div class="api-endpoint"><span class="method-put">PUT</span>  <code>/ipam/api/settings/snmp</code></div>
+
+    <div class="api-endpoint"><span class="method-get">GET</span>  <code>/ipam/api/settings/local-users</code></div>
+    <div class="api-endpoint"><span class="method-post">POST</span> <code>/ipam/api/settings/local-users</code></div>
+    <div class="api-endpoint"><span class="method-put">PUT</span>  <code>/ipam/api/settings/local-users/&lt;id&gt;</code></div>
+    <div class="api-endpoint"><span class="method-delete">DELETE</span> <code>/ipam/api/settings/local-users/&lt;id&gt;</code></div>
+
+    <div class="api-endpoint"><span class="method-get">GET</span>  <code>/ipam/api/settings/auth-log</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">ultimi accessi (login riusciti e falliti)</span></div>
+
+    <h3 id="api-scan-groups">Gruppi di Scansione</h3>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/settings/scan-groups</code></div>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/settings/scan-groups</code></div>
+    <pre><code>Body: { "name": "Sedi Nord", "group_type": "subnet", "schedule_time": "03:00", "enabled": true }</code></pre>
+    <div class="api-endpoint"><span class="method-put">PUT</span>    <code>/ipam/api/settings/scan-groups/&lt;id&gt;</code></div>
+    <div class="api-endpoint"><span class="method-delete">DELETE</span> <code>/ipam/api/settings/scan-groups/&lt;id&gt;</code></div>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/settings/scan-groups/&lt;id&gt;/items</code></div>
+    <pre><code>Body (rete):     { "network_id": 42 }
+Body (range IP): { "ip_range": "10.30.1.0/24" }</code></pre>
+    <div class="api-endpoint"><span class="method-delete">DELETE</span> <code>/ipam/api/settings/scan-groups/&lt;id&gt;/items/&lt;item_id&gt;</code></div>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/settings/scan-groups/&lt;id&gt;/run</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">avvia subito il gruppo</span></div>
+
+    <h3>Log Scansioni</h3>
+    <div class="api-endpoint"><span class="method-get">GET</span>    <code>/ipam/api/logs</code> <span style="color:var(--text-muted);font-size:11px;margin-left:.5rem">?type=subnet|snmp &amp;limit=100</span></div>
+    <div class="api-endpoint"><span class="method-delete">DELETE</span> <code>/ipam/api/logs/&lt;id&gt;</code></div>
+    <div class="api-endpoint"><span class="method-post">POST</span>  <code>/ipam/api/logs/clear</code></div>
+
+    <h2 id="scanner">Scanner</h2>
+    <p>
+      Il modulo <code>scanner.py</code> esegue per ogni IP della subnet:
+    </p>
+    <ol>
+      <li><strong>Ping</strong> — verifica se l'host risponde (comando di sistema, N thread paralleli)</li>
+      <li><strong>DNS PTR lookup</strong> — query reverse tramite <code>dnspython</code> verso i server configurati.
+          Se il primario risponde <code>NXDOMAIN</code>, viene interrogato il secondario.</li>
+      <li><strong>ARP / SNMP</strong> — lettura opzionale delle ARP table dai router (configurare <code>SNMP_ROUTERS</code>)</li>
+    </ol>
+    <p>I server DNS vengono letti dalla tabella <code>app_config</code> all'avvio e aggiornati a runtime ad ogni salvataggio nella pagina Impostazioni.</p>
+    <h3>Parametri configurabili (in <code>scanner.py</code>)</h3>
+    <ul>
+      <li><code>PING_TIMEOUT</code> — secondi per ping (default: 1)</li>
+      <li><code>DNS_TIMEOUT</code> — secondi per query DNS (default: 2)</li>
+      <li><code>MAX_WORKERS</code> — thread paralleli per subnet (default: 50)</li>
+      <li><code>MAX_SUBNET_WORKERS</code> — subnet in parallelo per scan globale (default: 4)</li>
+      <li><code>SNMP_COMMUNITY</code> — community SNMPv2c (default: <code>cmfpub</code>)</li>
+      <li><code>SNMP_ROUTERS</code> — lista IP router da cui leggere le ARP table</li>
+    </ul>
+    <h3>Utilizzo da riga di comando</h3>
+    <pre><code>python3 scanner.py --subnet-id 42
+python3 scanner.py --subnet 10.114.1.0 --cidr 24
+python3 scanner.py --all
+python3 scanner.py --all --skip-recent 6    # salta subnet scansionate nelle ultime 6 ore</code></pre>
+
+    <h2 id="scheduler">Scheduler</h2>
+    <p>
+      L'applicazione integra <strong>APScheduler</strong> (BackgroundScheduler) per l'esecuzione automatica
+      delle scansioni agli orari configurati nella pagina Impostazioni.
+    </p>
+    <h3>Funzionamento con Gunicorn multi-worker</h3>
+    <p>
+      Gunicorn può avviare più worker. Per evitare scheduler duplicati, l'applicazione usa un
+      <strong>file lock esclusivo</strong> (<code>instance/scheduler.lock</code> via <code>fcntl.LOCK_EX | LOCK_NB</code>).
+      Solo il primo worker che ottiene il lock avvia lo scheduler; gli altri lo ignorano silenziosamente.
+    </p>
+    <h3>Tipi di job schedulati</h3>
+    <ul>
+      <li><strong>Scansione globale</strong> — se abilitata, scansiona tutte le subnet attive all'orario configurato</li>
+      <li><strong>Gruppi di scansione</strong> — ogni gruppo abilitato con un orario viene schedulato con CronTrigger</li>
+    </ul>
+    <p>
+      Lo scheduler viene ricaricato automaticamente ad ogni modifica alle impostazioni o ai gruppi
+      (<code>_reload_scheduler_jobs()</code>).
+    </p>
+    <h3>Dipendenza da installare</h3>
+    <pre><code>pip install "apscheduler>=3.6,&lt;4.0"</code></pre>
+
+    <h2 id="scripts">Script Utility</h2>
+
+    <h3><code>fill_missing_ips.py</code></h3>
+    <p>
+      Popola le subnet con tutti gli IP mancanti impostando <code>status='available'</code>.
+      Utile dopo l'importazione di reti da SolarWinds o altri sistemi che non includono la
+      lista completa degli host.
+    </p>
+    <ul>
+      <li>Salta reti con CIDR &lt; <code>--cidr-min</code> (default: 17, cioè /16 e più grandi)</li>
+      <li>Salta subnet che hanno subnet figlie (solo le foglie vengono popolate)</li>
+      <li>Usa <code>INSERT OR IGNORE</code> — è idempotente, può essere rieseguito senza danni</li>
+    </ul>
+    <pre><code>python3 fill_missing_ips.py --dry-run          # mostra quanti IP verrebbero aggiunti
+python3 fill_missing_ips.py                    # esegue l'inserimento
+python3 fill_missing_ips.py --cidr-min 20      # salta reti /19 e più grandi</code></pre>
+
+    <h3><code>update.sh</code></h3>
+    <p>
+      Aggiorna i file dell'applicazione preservando il database e le configurazioni esistenti.
+      Copia i file sorgente, installa le dipendenze aggiornate e riavvia il servizio Gunicorn.
+    </p>
+    <pre><code>sudo /sorgente/ipam/update.sh</code></pre>
+
+    <h2 id="changelog">Changelog</h2>
+
+    <h3>v1.9.0 — Maggio 2026</h3>
+    <ul>
+      <li><strong>Ottimizzazione performance pagina IP</strong>: aggiunta colonna <code>ip_int</code> (IPv4 come intero 32-bit) a <code>ip_records</code> — il sort per indirizzo IP passa da O(n) con CAST/SUBSTR a O(log n) con indice B-tree</li>
+      <li>Migrazione automatica all'avvio: <code>_ensure_indexes()</code> aggiunge la colonna se mancante, esegue il backfill in batch da 2.000 righe e crea l'indice</li>
+      <li>Nuovi indici su <code>device_type</code>, <code>switch_name</code>, <code>os_type</code>, <code>last_seen</code> — velocizzano filtri e ordinamento sulla pagina IP</li>
+      <li>Cache in-memory (TTL 5 minuti) per i valori distinti dei dropdown Tipo Dispositivo e OS — eliminati due full scan da 360K righe ad ogni caricamento pagina</li>
+      <li><code>fill_missing_ips.py</code> e scanner aggiornati per calcolare e scrivere <code>ip_int</code> sui nuovi record</li>
+    </ul>
+
+    <h3>v1.8.0 — Maggio 2026</h3>
+    <ul>
+      <li><strong>Ordinamento per colonna</strong> nella pagina <em>Indirizzi IP</em>: click sull'intestazione di qualsiasi colonna ordina la lista in modo crescente/decrescente; freccia indicatrice nella testata attiva</li>
+      <li><strong>Filtri per colonna</strong> nella pagina <em>Indirizzi IP</em>: aggiornata barra filtri con dropdown dinamici per <em>Tipo Dispositivo</em> e <em>OS</em> (valori letti dal DB), campi testo per <em>Switch</em> e <em>Rete</em></li>
+      <li>Tutti i filtri si combinano e vengono preservati nella paginazione</li>
+      <li>Parametri URL: <code>sort</code>, <code>dir</code>, <code>device_type</code>, <code>os_type</code>, <code>switch_name</code>, <code>network_q</code></li>
+    </ul>
+
+    <h3>v1.7.0 — Maggio 2026</h3>
+    <ul>
+      <li><strong>Fix critico pulsante Modifica IP</strong>: il filtro Jinja2 <code>tojson</code> produce stringhe con doppi apici che rompevano l'attributo HTML <code>onclick="..."</code>. Tutti i pulsanti Modifica in <code>network_detail.html</code> ora usano apici singoli come delimitatore (<code>onclick='...'</code>), rendendo funzionante la modifica di qualsiasi indirizzo IP</li>
+      <li>Stesso fix applicato ai pulsanti Modifica delle subnet figlie</li>
+    </ul>
+
+    <h3>v1.6.3 — Maggio 2026</h3>
+    <ul>
+      <li><strong>SNMP Discovery</strong>: nuova sezione in Impostazioni. Interroga router e switch via SNMP per arricchire i record IP con MAC address, nome switch e numero porta</li>
+      <li>Nuove colonne su <code>ip_records</code>: <code>switch_name</code>, <code>switch_port</code>, <code>snmp_updated_at</code> — migrate automaticamente all'avvio</li>
+      <li>Nuovo file <code>snmp_discovery.py</code>: lettura ARP table, FDB 802.1Q/Cisco, nomi interfacce, hostname via <code>sysName</code></li>
+      <li>Discovery asincrona con stato in tempo reale: <code>POST /api/snmp/discover</code> + <code>GET /api/snmp/discover/status</code></li>
+      <li><strong>Log Scansioni</strong>: nuova pagina <code>/ipam/logs</code> con auto-refresh ogni 3 secondi se ci sono scan in corso</li>
+      <li>Nuovo modello DB <code>scan_logs</code> — creato automaticamente all'avvio</li>
+    </ul>
+    <h3>v1.6.2 — Maggio 2026</h3>
+    <ul>
+      <li><strong>Supporto OpenLDAP</strong>: nuovo campo "Tipo server" (Active Directory / OpenLDAP). Logica di autenticazione adattata al tipo selezionato</li>
+      <li>Verifica gruppo OpenLDAP: <code>posixGroup</code> (<code>memberUid</code>), <code>groupOfNames</code> (<code>member</code>), <code>groupOfUniqueNames</code> (<code>uniqueMember</code>)</li>
+    </ul>
+    <h3>v1.6.1 — Maggio 2026</h3>
+    <ul>
+      <li><strong>Fix LDAP nested groups</strong>: ricerca ricorsiva AD tramite <code>LDAP_MATCHING_RULE_IN_CHAIN</code> per membership transitiva</li>
+      <li>Confronto gruppo case-insensitive; test LDAP mostra dettaglio match e lista gruppi in caso di mancata corrispondenza</li>
+    </ul>
+    <h3>v1.6.0 — Maggio 2026</h3>
+    <ul>
+      <li><strong>Autenticazione obbligatoria</strong>: tutte le pagine e API protette; reindirizzamento a <code>/ipam/login</code> o HTTP 401 JSON</li>
+      <li><strong>Utenti locali</strong>: tabella <code>local_users</code>; utente <code>admin</code> creato al primo avvio; CRUD completo in Impostazioni</li>
+      <li><strong>Autenticazione LDAP / AD</strong>: bind di servizio, ricerca <code>sAMAccountName</code>, controllo gruppo, fallback locale</li>
+      <li>Fix redirect post-login con header <code>X-Forwarded-Host</code> / <code>X-Forwarded-Proto</code> da Apache</li>
+    </ul>
+    <h3>v1.5.0 — Maggio 2026</h3>
+    <ul>
+      <li>Nuova pagina <strong>Impostazioni</strong>: DNS, scansione globale, gruppi di scan pianificata</li>
+      <li>Integrazione APScheduler con file lock per Gunicorn multi-worker</li>
+    </ul>
+    <h3>v1.4.0 — Maggio 2026</h3>
+    <ul>
+      <li>Nuova pagina <strong>Bulk Edit</strong>; API <code>GET /api/networks</code> riscritta con SQL diretto (no N+1); API IP Records con paginazione</li>
+    </ul>
+    <h3>v1.3.0 — 2025</h3>
+    <ul>
+      <li><code>install.sh</code> universale Debian + RHEL; gestione automatica SELinux; apertura porta 80 via <code>firewall-cmd</code></li>
+    </ul>
+    <h3>v1.1.0 — 2025</h3>
+    <ul>
+      <li>Migrazione da Flask dev-server a Gunicorn + Apache reverse proxy; middleware <code>ReverseProxied</code></li>
+    </ul>
+    <h3>v1.0.0 — 2025</h3>
+    <ul>
+      <li>Prima release: Dashboard, Reti, IP, VLAN, API REST, design responsive</li>
+    </ul>
+
+  </div>
+</div>
+
+<script>
+const sections = document.querySelectorAll('h2[id], h3[id]');
+const navLinks  = document.querySelectorAll('.docs-nav a');
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach(s => { if (s.getBoundingClientRect().top < 120) current = s.id; });
+  navLinks.forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+  });
+}, { passive: true });
+</script>
+{% endblock %}

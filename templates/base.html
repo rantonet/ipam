@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="it" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}IPAM{% endblock %} — IP Address Manager</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232f81f7'/><text x='16' y='22' text-anchor='middle' font-size='14' font-weight='700' fill='white' font-family='monospace'>IP</text></svg>">
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     TOPBAR
+═══════════════════════════════════════════════ -->
+<header class="topbar" id="topbar">
+  <div class="topbar-brand">
+    <div class="brand-icon">IP</div>
+    <div class="brand-text">
+      <span class="brand-name">IPAM</span>
+      <span class="brand-sub">Network Manager</span>
+    </div>
+  </div>
+
+  <nav class="topbar-nav">
+    <a href="{{ url_for('index') }}"
+       class="topnav-item {% if request.endpoint == 'index' %}active{% endif %}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a href="{{ url_for('networks') }}"
+       class="topnav-item {% if request.endpoint in ['networks','network_detail'] %}active{% endif %}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+      Reti
+    </a>
+    <a href="{{ url_for('ip_addresses') }}"
+       class="topnav-item {% if request.endpoint == 'ip_addresses' %}active{% endif %}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>
+      Indirizzi IP
+    </a>
+    <a href="{{ url_for('vlans') }}"
+       class="topnav-item {% if request.endpoint == 'vlans' %}active{% endif %}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h2a2 2 0 0 1 2 2v2M6 3H4a2 2 0 0 0-2 2v2"/></svg>
+      VLAN
+    </a>
+    <a href="{{ url_for('bulk_edit') }}"
+       class="topnav-item {% if request.endpoint == 'bulk_edit' %}active{% endif %}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      Bulk Edit
+    </a>
+    <a href="{{ url_for('documentation') }}"
+       class="topnav-item {% if request.endpoint == 'documentation' %}active{% endif %}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Docs
+    </a>
+    <a href="{{ url_for('scan_logs_page') }}"
+       class="topnav-item {% if request.endpoint == 'scan_logs_page' %}active{% endif %}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z"/></svg>
+      Log
+    </a>
+    <a href="{{ url_for('settings') }}"
+       class="topnav-item {% if request.endpoint == 'settings' %}active{% endif %}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Impostazioni
+    </a>
+  </nav>
+
+  <div class="topbar-actions">
+    {% block header_actions %}{% endblock %}
+    {% if current_user.is_authenticated %}
+    <div style="display:flex;align-items:center;gap:.5rem;margin-right:.4rem">
+      <span style="font-size:.78rem;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            title="{{ current_user.display_name }}">
+        {% if current_user.source == 'ldap' %}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:2px"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        {% endif %}
+        {{ current_user.display_name }}
+      </span>
+      <a href="{{ url_for('auth_logout') }}" class="btn btn-secondary"
+         style="padding:.28rem .55rem;font-size:.75rem" title="Esci">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Esci
+      </a>
+    </div>
+    {% endif %}
+    <button class="topbar-mobile-toggle" id="mobileTreeToggle" title="Albero reti">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════
+     LAYOUT BODY: sidebar albero + contenuto
+═══════════════════════════════════════════════ -->
+<div class="app-body">
+
+  <!-- Sidebar albero gerarchico reti -->
+  <aside class="tree-sidebar" id="treeSidebar">
+    <div class="tree-sidebar-header">
+      <span class="tree-sidebar-title">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+        Albero Reti
+      </span>
+      <button class="tree-refresh-btn" id="treeRefreshBtn" title="Aggiorna">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      </button>
+    </div>
+    <div class="tree-sidebar-search">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="treeSearchInput" placeholder="Filtra reti…">
+    </div>
+    <div class="tree-sidebar-body" id="treeBody">
+      <div class="tree-loading">Caricamento…</div>
+    </div>
+  </aside>
+
+  <!-- Overlay mobile per l'albero -->
+  <div class="tree-overlay" id="treeOverlay"></div>
+  <div class="tree-resizer" id="treeResizer"></div>
+
+  <!-- Contenuto principale -->
+  <div class="main-content">
+    <div class="page-bar">
+      {% block page_title %}
+      <div class="page-title-wrap"></div>
+      {% endblock %}
+    </div>
+    <main class="page-body fade-in">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+</div><!-- /app-body -->
+
+<!-- Toast -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ── Toast ────────────────────────────────────────
+function showToast(message, type = 'info') {
+  const tc = document.getElementById('toastContainer');
+  const t  = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  const icons = {
+    success: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    error:   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+    info:    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+  };
+  t.innerHTML = (icons[type] || icons.info) + `<span>${message}</span>`;
+  tc.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+// ── Modal ────────────────────────────────────────
+function openModal(id)  { document.getElementById(id)?.classList.add('open'); }
+function closeModal(id) { document.getElementById(id)?.classList.remove('open'); }
+document.querySelectorAll('[data-close-modal]').forEach(btn =>
+  btn.addEventListener('click', () => closeModal(btn.dataset.closeModal))
+);
+document.querySelectorAll('.modal-overlay').forEach(ov =>
+  ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); })
+);
+
+// ── API fetch ────────────────────────────────────
+async function apiFetch(url, options = {}) {
+  options.headers = { 'Content-Type': 'application/json', ...(options.headers||{}) };
+  try {
+    const res = await fetch(url, options);
+    let data;
+    try {
+      data = await res.json();
+    } catch(e) {
+      throw new Error(`Errore server (HTTP ${res.status})`);
+    }
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  } catch (err) {
+    showToast(err.message, 'error');
+    throw err;
+  }
+}
+
+// ── Albero reti ──────────────────────────────────
+var ACTIVE_NET_ID = null;
+
+function usageClass(pct) {
+  if (pct < 50) return 'usage-low';
+  if (pct < 75) return 'usage-med';
+  if (pct < 90) return 'usage-high';
+  return 'usage-crit';
+}
+
+function buildTreeNode(node, depth) {
+  const hasChildren = node.children && node.children.length > 0;
+  const isActive    = node.id === ACTIVE_NET_ID;
+  const indent      = depth * 14;
+
+  const li = document.createElement('li');
+  li.className = 'tree-node';
+
+  const row = document.createElement('a');
+  row.href      = `/ipam/networks/${node.id}`;
+  row.className = 'tree-row' + (isActive ? ' active' : '');
+  row.style.paddingLeft = (10 + indent) + 'px';
+  row.dataset.netId = node.id;
+  row.dataset.name  = (node.name || '').toLowerCase();
+  row.dataset.addr  = (node.address || '').toLowerCase();
+
+  // Icona toggle/leaf
+  const tog = document.createElement('span');
+  tog.className = 'tree-tog';
+  if (hasChildren) {
+    tog.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>';
+    tog.classList.add('has-children');
+  } else {
+    tog.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/></svg>';
+  }
+
+  // Icona tipo rete
+  const ico = document.createElement('span');
+  ico.className = 'tree-ico';
+  if (node.network_type === 'supernet') {
+    ico.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>';
+    ico.classList.add('ico-supernet');
+  } else {
+    ico.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>';
+    ico.classList.add('ico-subnet');
+  }
+
+  // Testo
+  const txt = document.createElement('span');
+  txt.className = 'tree-txt';
+  txt.innerHTML = `<span class="tree-name">${node.name}</span>
+    <span class="tree-cidr">${node.address}/${node.cidr}</span>`;
+
+  // Barra utilizzo
+  const bar = document.createElement('span');
+  bar.className = 'tree-bar-wrap';
+  const pct = node.usage_percent || 0;
+  bar.innerHTML = `<span class="tree-bar"><span class="tree-bar-fill ${usageClass(pct)}" style="width:${pct}%"></span></span>`;
+
+  row.appendChild(tog);
+  row.appendChild(ico);
+  row.appendChild(txt);
+  row.appendChild(bar);
+  li.appendChild(row);
+
+  // ── Drag & Drop ──────────────────────────────
+  row.draggable = true;
+
+  row.addEventListener('dragstart', function(e) {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(node.id));
+    setTimeout(function(){ row.classList.add('dragging'); }, 0);
+  });
+
+  row.addEventListener('dragend', function() {
+    row.classList.remove('dragging');
+    document.querySelectorAll('.tree-row.drag-over').forEach(function(el){ el.classList.remove('drag-over'); });
+  });
+
+  row.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var draggedId = parseInt(e.dataTransfer.getData('text/plain'));
+    if (draggedId !== node.id) {
+      document.querySelectorAll('.tree-row.drag-over').forEach(function(el){ el.classList.remove('drag-over'); });
+      row.classList.add('drag-over');
+      e.dataTransfer.dropEffect = 'move';
+    }
+  });
+
+  row.addEventListener('dragleave', function(e) {
+    if (!row.contains(e.relatedTarget)) {
+      row.classList.remove('drag-over');
+    }
+  });
+
+  row.addEventListener('drop', async function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    row.classList.remove('drag-over');
+    var draggedId = parseInt(e.dataTransfer.getData('text/plain'));
+    if (!draggedId || draggedId === node.id) return;
+    try {
+      await apiFetch('/ipam/api/networks/' + draggedId, {
+        method: 'PUT',
+        body: JSON.stringify({ parent_id: node.id })
+      });
+      await apiFetch('/ipam/api/networks/tree/invalidate', { method: 'POST' });
+      showToast('Rete spostata sotto ' + node.name, 'success');
+      _treeData = null;
+      loadTree(true);
+    } catch(err) { /* già gestito da apiFetch */ }
+  });
+
+  // Figli
+  if (hasChildren) {
+    const ul = document.createElement('ul');
+    ul.className = 'tree-children collapsed';
+    node.children.forEach(child => ul.appendChild(buildTreeNode(child, depth + 1)));
+    li.appendChild(ul);
+
+    // Toggle expand/collapse al click sulla freccia
+    tog.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const open = ul.classList.toggle('collapsed');
+      tog.classList.toggle('open', !open);
+    });
+
+    // Se contiene il nodo attivo, apri subito
+    if (isActive || nodeContains(node, ACTIVE_NET_ID)) {
+      ul.classList.remove('collapsed');
+      tog.classList.add('open');
+    }
+  }
+
+  return li;
+}
+
+function nodeContains(node, id) {
+  if (!node.children) return false;
+  return node.children.some(c => c.id === id || nodeContains(c, id));
+}
+
+// Cache albero in sessionStorage per navigazione rapida
+var _treeData = null;
+var _treeTs   = 0;
+var TREE_TTL  = 120000; // 2 minuti
+
+async function loadTree(forceRefresh) {
+  const body = document.getElementById('treeBody');
+
+  // Usa cache se recente e non e' un refresh forzato
+  var now = Date.now();
+  if (!forceRefresh && _treeData && (now - _treeTs) < TREE_TTL) {
+    renderTree(_treeData, body);
+    return;
+  }
+
+  body.innerHTML = '<div class="tree-loading">Caricamento...</div>';
+  try {
+    const resp = await fetch('/ipam/api/networks/tree');
+    const tree = await resp.json();
+    _treeData = tree;
+    _treeTs   = Date.now();
+    renderTree(tree, body);
+  } catch(e) {
+    body.innerHTML = '<div class="tree-empty">Errore caricamento</div>';
+  }
+}
+
+function renderTree(tree, body) {
+  if (!tree || !tree.length) {
+    body.innerHTML = '<div class="tree-empty">Nessuna rete configurata</div>';
+    return;
+  }
+  const ul = document.createElement('ul');
+  ul.className = 'tree-root';
+  tree.forEach(node => ul.appendChild(buildTreeNode(node, 0)));
+  body.innerHTML = '';
+  body.appendChild(ul);
+}
+
+// Filtro ricerca albero
+document.getElementById('treeSearchInput').addEventListener('input', function() {
+  const q = this.value.toLowerCase().trim();
+  document.querySelectorAll('.tree-row').forEach(row => {
+    const match = !q || row.dataset.name.includes(q) || row.dataset.addr.includes(q);
+    row.closest('.tree-node').style.display = match ? '' : 'none';
+    if (match && q) {
+      // Espandi tutti i genitori
+      let ul = row.closest('ul.tree-children');
+      while (ul) {
+        ul.classList.remove('collapsed');
+        const tog = ul.previousElementSibling?.querySelector('.tree-tog');
+        if (tog) tog.classList.add('open');
+        ul = ul.closest('.tree-node')?.closest('ul.tree-children');
+      }
+    }
+  });
+});
+
+document.getElementById('treeRefreshBtn').addEventListener('click', function(){ _treeData=null; loadTree(true); });
+
+// Mobile toggle albero
+const mobileToggle = document.getElementById('mobileTreeToggle');
+const treeSidebar  = document.getElementById('treeSidebar');
+const treeOverlay  = document.getElementById('treeOverlay');
+mobileToggle.addEventListener('click', () => {
+  treeSidebar.classList.toggle('open');
+  treeOverlay.classList.toggle('open');
+});
+treeOverlay.addEventListener('click', () => {
+  treeSidebar.classList.remove('open');
+  treeOverlay.classList.remove('open');
+});
+
+// Carica albero all'avvio
+loadTree();
+
+// ── Sidebar resizer ──────────────────────────────
+(function() {
+  var resizer  = document.getElementById('treeResizer');
+  var sidebar  = document.getElementById('treeSidebar');
+  var main     = document.querySelector('.main-content');
+  if (!resizer || !sidebar) return;
+
+  var isResizing = false;
+  var startX, startW;
+
+  resizer.addEventListener('mousedown', function(e) {
+    isResizing = true;
+    startX = e.clientX;
+    startW = sidebar.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!isResizing) return;
+    var newW = Math.min(Math.max(startW + (e.clientX - startX), 160), 600);
+    sidebar.style.width = newW + 'px';
+    resizer.style.left  = newW + 'px';
+    if (main) main.style.marginLeft = newW + 'px';
+    // Aggiorna la variabile CSS
+    document.documentElement.style.setProperty('--tree-w', newW + 'px');
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (!isResizing) return;
+    isResizing = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // Salva preferenza
+    try { localStorage.setItem('ipam_tree_w', sidebar.style.width); } catch(e) {}
+  });
+
+  // Ripristina larghezza salvata
+  try {
+    var saved = localStorage.getItem('ipam_tree_w');
+    if (saved) {
+      var w = parseInt(saved);
+      if (w >= 160 && w <= 600) {
+        sidebar.style.width = w + 'px';
+        resizer.style.left  = w + 'px';
+        if (main) main.style.marginLeft = w + 'px';
+        document.documentElement.style.setProperty('--tree-w', w + 'px');
+      }
+    }
+  } catch(e) {}
+})();
+
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

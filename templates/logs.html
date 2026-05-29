@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Log Scansioni — IPAM{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width:1200px;padding:1.5rem 1rem">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.8rem;margin-bottom:1.4rem">
+    <h1 style="font-size:1.25rem;font-weight:700;margin:0">Log Scansioni</h1>
+    <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+      <!-- Filtri tipo -->
+      <div style="display:flex;gap:.35rem">
+        <button class="btn btn-secondary btn-sm filter-btn active" data-type="" onclick="setFilter(this,'')">Tutte</button>
+        <button class="btn btn-secondary btn-sm filter-btn" data-type="subnet" onclick="setFilter(this,'subnet')">Subnet</button>
+        <button class="btn btn-secondary btn-sm filter-btn" data-type="snmp"   onclick="setFilter(this,'snmp')">SNMP</button>
+        <button class="btn btn-secondary btn-sm filter-btn" data-type="global" onclick="setFilter(this,'global')">Globale</button>
+        <button class="btn btn-secondary btn-sm filter-btn" data-type="group"  onclick="setFilter(this,'group')">Gruppo</button>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="loadLogs()" id="refreshBtn" title="Aggiorna">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="clearLogs()" title="Cancella log completati">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2"/></svg>
+        Cancella completati
+      </button>
+    </div>
+  </div>
+
+  <div id="logStatus" style="font-size:.82rem;color:var(--text-muted);margin-bottom:.6rem;min-height:1.2em"></div>
+
+  <div class="table-wrap">
+    <table id="logTable">
+      <thead>
+        <tr>
+          <th style="width:90px">Tipo</th>
+          <th>Target</th>
+          <th style="width:155px">Avvio</th>
+          <th style="width:80px;text-align:right">Durata</th>
+          <th style="width:90px">Stato</th>
+          <th style="width:70px;text-align:right">Totale</th>
+          <th style="width:70px;text-align:right">Trovati</th>
+          <th style="width:80px;text-align:right">Aggiornati</th>
+          <th style="width:65px;text-align:right">Errori</th>
+          <th style="width:32px"></th>
+        </tr>
+      </thead>
+      <tbody id="logBody">
+        <tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:2rem">Caricamento…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<style>
+.btn-sm { padding:.28rem .65rem; font-size:.8rem; }
+.filter-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+.badge-type-subnet { background:#1d4ed8;color:#fff; }
+.badge-type-snmp   { background:#7c3aed;color:#fff; }
+.badge-type-global { background:#065f46;color:#fff; }
+.badge-type-group  { background:#92400e;color:#fff; }
+
+.badge-status-running { background:#d97706;color:#fff; }
+.badge-status-ok      { background:#16a34a;color:#fff; }
+.badge-status-error   { background:#dc2626;color:#fff; }
+
+.badge-log {
+  display:inline-block;font-size:.72rem;padding:.15rem .45rem;
+  border-radius:4px;white-space:nowrap;font-weight:600;letter-spacing:.02em;
+}
+</style>
+
+<script>
+var _currentType = '';
+var _autoRefresh = null;
+var _hasRunning  = false;
+
+var TYPE_LABELS = { subnet:'Subnet', snmp:'SNMP', global:'Globale', group:'Gruppo' };
+var TYPE_CLASSES = { subnet:'badge-type-subnet', snmp:'badge-type-snmp',
+                     global:'badge-type-global', group:'badge-type-group' };
+
+function setFilter(btn, type) {
+  document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  _currentType = type;
+  loadLogs();
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+  var pad = function(n) { return ('0'+n).slice(-2); };
+  return d.getFullYear() + '/' + pad(d.getMonth()+1) + '/' + pad(d.getDate()) + ' ' +
+         pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+function fmtDuration(s) {
+  if (s === null || s === undefined) return '—';
+  if (s < 60)   return s + 's';
+  return Math.floor(s/60) + 'm ' + (s%60) + 's';
+}
+
+function loadLogs() {
+  var url = '/ipam/api/logs?limit=200';
+  if (_currentType) url += '&type=' + _currentType;
+
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(rows) {
+      var tbody  = document.getElementById('logBody');
+      var status = document.getElementById('logStatus');
+      _hasRunning = rows.some(function(r) { return r.status === 'running'; });
+
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:2rem">Nessun log presente</td></tr>';
+        status.textContent = '';
+        return;
+      }
+
+      var html = '';
+      rows.forEach(function(r) {
+        var typeCls   = TYPE_CLASSES[r.scan_type] || '';
+        var typeLabel = TYPE_LABELS[r.scan_type]  || r.scan_type;
+        var stCls     = 'badge-status-' + (r.status || 'running');
+        var stLabel   = r.status === 'running' ? '⏳ In corso'
+                      : r.status === 'ok'      ? '✓ OK'
+                      : r.status === 'error'   ? '✗ Errore'
+                      : r.status;
+        var errTitle = r.error_msg ? ' title="' + r.error_msg.replace(/"/g,'&quot;') + '"' : '';
+        var notes    = r.notes ? '<div style="font-size:.75rem;color:var(--text-muted)">' + r.notes + '</div>' : '';
+        html += '<tr>'
+          + '<td><span class="badge-log ' + typeCls + '">' + typeLabel + '</span></td>'
+          + '<td style="font-size:.85rem;font-family:monospace">' + (r.target || '—') + notes + '</td>'
+          + '<td style="font-size:.82rem;color:var(--text-muted)">' + fmtDate(r.started_at) + '</td>'
+          + '<td style="text-align:right;font-size:.82rem">' + fmtDuration(r.duration_s) + '</td>'
+          + '<td><span class="badge-log ' + stCls + '"' + errTitle + '>' + stLabel + '</span></td>'
+          + '<td style="text-align:right;font-size:.82rem">' + (r.hosts_total  || 0) + '</td>'
+          + '<td style="text-align:right;font-size:.82rem;color:#3fb950">'   + (r.hosts_found   || 0) + '</td>'
+          + '<td style="text-align:right;font-size:.82rem;color:#58a6ff">'   + (r.hosts_updated || 0) + '</td>'
+          + '<td style="text-align:right;font-size:.82rem;color:#f0883e">'   + (r.hosts_error   || 0) + '</td>'
+          + '<td style="padding:.2rem .4rem">'
+          +   (r.status !== 'running'
+                ? '<button onclick="deleteLog(' + r.id + ',this)" style="background:none;border:none;'
+                +   'color:var(--text-muted);cursor:pointer;font-size:1rem;line-height:1" title="Elimina">×</button>'
+                : '')
+          + '</td>'
+          + '</tr>';
+      });
+      tbody.innerHTML = html;
+      status.textContent = rows.length + ' log' + (_hasRunning ? ' — aggiornamento automatico attivo' : '');
+
+      // Auto-refresh se ci sono scansioni in corso
+      if (_hasRunning && !_autoRefresh) {
+        _autoRefresh = setInterval(loadLogs, 3000);
+      } else if (!_hasRunning && _autoRefresh) {
+        clearInterval(_autoRefresh);
+        _autoRefresh = null;
+      }
+    });
+}
+
+function deleteLog(id, btn) {
+  btn.disabled = true;
+  fetch('/ipam/api/logs/' + id, { method: 'DELETE' })
+    .then(function(r) { return r.json(); })
+    .then(function() { loadLogs(); });
+}
+
+function clearLogs() {
+  var data = _currentType ? { type: _currentType } : {};
+  fetch('/ipam/api/logs/clear', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function() { loadLogs(); });
+}
+
+loadLogs();
+</script>
+{% endblock %}

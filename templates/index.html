@@ -1,0 +1,388 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block page_title %}
+<div class="page-title">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+  Dashboard
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- Stats Row -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-icon blue">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+    </div>
+    <div class="stat-label">Reti Totali</div>
+    <div class="stat-value">{{ total_networks }}</div>
+    <div class="stat-sub">subnet + supernet</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon green">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>
+    </div>
+    <div class="stat-label">IP Totali (spazio)</div>
+    <div class="stat-value">{{ "{:,}".format(total_hosts) }}</div>
+    <div class="stat-sub">host address disponibili</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon yellow">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+    </div>
+    <div class="stat-label">IP in Uso</div>
+    <div class="stat-value">{{ "{:,}".format(total_used) }}</div>
+    <div class="stat-sub">{{ global_usage }}% utilizzo globale</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon purple">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h2a2 2 0 0 1 2 2v2M6 3H4a2 2 0 0 0-2 2v2"/></svg>
+    </div>
+    <div class="stat-label">VLAN Configurate</div>
+    <div class="stat-value">{{ total_vlans }}</div>
+    <div class="stat-sub">VLAN attive</div>
+  </div>
+</div>
+
+<!-- Dashboard Grid -->
+<div class="dashboard-grid">
+
+  <!-- Global Usage -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Utilizzo Globale
+      </div>
+    </div>
+    <div class="card-body">
+      <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap">
+        <div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:48px;font-weight:700;color:var(--text-primary);line-height:1">{{ global_usage }}<span style="font-size:20px;color:var(--text-muted)">%</span></div>
+          <div style="color:var(--text-muted);font-size:12px;margin-top:4px">degli indirizzi sono in uso</div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:.375rem;font-size:12px;color:var(--text-muted)">
+            <span>Usati: {{ "{:,}".format(total_used) }}</span>
+            <span>Totale: {{ "{:,}".format(total_hosts) }}</span>
+          </div>
+          <div class="usage-bar" style="height:12px;border-radius:6px">
+            {% set uc = global_usage %}
+            <div class="usage-fill {% if uc < 50 %}usage-low{% elif uc < 75 %}usage-med{% elif uc < 90 %}usage-high{% else %}usage-crit{% endif %}"
+                 style="width:{{ uc }}%"></div>
+          </div>
+          <div class="usage-legend" style="margin-top:.75rem">
+            <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>&lt;50% OK</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div>50–75% Attenzione</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div>75–90% Critico</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>&gt;90% Esaurito</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Networks -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        Reti più Utilizzate
+      </div>
+      <a href="{{ url_for('networks') }}" class="btn btn-secondary btn-sm">Tutte le reti →</a>
+    </div>
+    <div class="card-body" style="padding:0">
+      {% for net in top_networks %}
+      <div style="display:flex;align-items:center;gap:.875rem;padding:.75rem 1.25rem;border-bottom:1px solid var(--border-subtle){% if loop.last %};border-bottom:none{% endif %}">
+        <div style="min-width:0;flex:1">
+          <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            <a href="{{ url_for('network_detail', net_id=net.id) }}" style="color:var(--text-primary)">{{ net.name }}</a>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-muted)">{{ net.address }}/{{ net.cidr }}</div>
+        </div>
+        <div class="usage-bar-wrap" style="min-width:160px">
+          <div class="usage-bar" style="flex:1">
+            {% set up = net.usage_percent %}
+            <div class="usage-fill {% if up < 50 %}usage-low{% elif up < 75 %}usage-med{% elif up < 90 %}usage-high{% else %}usage-crit{% endif %}"
+                 style="width:{{ up }}%"></div>
+          </div>
+          <div class="usage-pct">{{ up }}%</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="card full-width">
+    <div class="card-header">
+      <div class="card-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Azioni Rapide
+      </div>
+    </div>
+    <div class="card-body" style="display:flex;gap:.75rem;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="openModal('modalAddNetwork')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Aggiungi Rete
+      </button>
+      <button class="btn btn-secondary" onclick="openModal('modalAddIP')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>
+        Aggiungi IP
+      </button>
+      <button class="btn btn-secondary" onclick="openModal('modalAddVlan')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h2a2 2 0 0 1 2 2v2M6 3H4a2 2 0 0 0-2 2v2"/></svg>
+        Aggiungi VLAN
+      </button>
+      <a href="{{ url_for('networks') }}" class="btn btn-secondary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Cerca Rete
+      </a>
+    </div>
+  </div>
+
+</div><!-- /dashboard-grid -->
+
+<!-- ── Modal: Add Network ── -->
+<div class="modal-overlay" id="modalAddNetwork">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Aggiungi Rete</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalAddNetwork">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Indirizzo *</label>
+          <input id="netAddress" class="form-control" placeholder="192.168.1.0" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">CIDR *</label>
+          <input id="netCidr" class="form-control" type="number" min="1" max="32" placeholder="24" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nome *</label>
+        <input id="netName" class="form-control" placeholder="es. Rete Uffici Milano" required>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Location</label>
+          <input id="netLocation" class="form-control" placeholder="Sede di Milano">
+        </div>
+        <div class="form-group">
+          <label class="form-label">VLAN ID</label>
+          <input id="netVlan" class="form-control" type="number" placeholder="100">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Tipo</label>
+          <select id="netType" class="form-control filter-select" style="width:100%">
+            <option value="subnet">Subnet</option>
+            <option value="supernet">Supernet</option>
+            <option value="vlan">VLAN Network</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stato</label>
+          <select id="netStatus" class="form-control filter-select" style="width:100%">
+            <option value="active">active</option>
+            <option value="reserved">reserved</option>
+            <option value="deprecated">deprecated</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Country</label>
+          <input id="netCountry" class="form-control" placeholder="es. Italy">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Site</label>
+          <input id="netSite" class="form-control" placeholder="es. Milano DC1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Usage</label>
+          <input id="netUsage" class="form-control" placeholder="es. Production">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Zone</label>
+          <input id="netZone" class="form-control" placeholder="es. DMZ">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Gateway</label>
+          <input id="netGateway" class="form-control" placeholder="es. 192.168.1.1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Descrizione</label>
+          <input id="netDesc" class="form-control" placeholder="Descrizione opzionale">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalAddNetwork">Annulla</button>
+      <button class="btn btn-primary" onclick="submitAddNetwork()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Add IP ── -->
+<div class="modal-overlay" id="modalAddIP">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Aggiungi Indirizzo IP</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalAddIP">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Indirizzo IP *</label>
+        <input id="ipAddress" class="form-control" placeholder="192.168.1.10" required>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Hostname</label>
+          <input id="ipHostname" class="form-control" placeholder="server01.local">
+        </div>
+        <div class="form-group">
+          <label class="form-label">MAC Address</label>
+          <input id="ipMac" class="form-control" placeholder="AA:BB:CC:DD:EE:FF">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Tipo Dispositivo</label>
+          <select id="ipDevType" class="form-control filter-select" style="width:100%">
+            <option value="">— Seleziona —</option>
+            <option value="server">Server</option>
+            <option value="workstation">Workstation</option>
+            <option value="router">Router</option>
+            <option value="switch">Switch</option>
+            <option value="printer">Stampante</option>
+            <option value="ap">Access Point</option>
+            <option value="phone">VoIP Phone</option>
+            <option value="other">Altro</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stato</label>
+          <select id="ipStatus" class="form-control filter-select" style="width:100%">
+            <option value="used">In uso</option>
+            <option value="reserved">Riservato</option>
+            <option value="dhcp">DHCP</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrizione</label>
+        <input id="ipDesc" class="form-control" placeholder="Opzionale">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalAddIP">Annulla</button>
+      <button class="btn btn-primary" onclick="submitAddIP()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Add VLAN ── -->
+<div class="modal-overlay" id="modalAddVlan">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Aggiungi VLAN</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalAddVlan">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">VLAN ID *</label>
+          <input id="vlanId" class="form-control" type="number" min="1" max="4094" placeholder="100" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nome *</label>
+          <input id="vlanName" class="form-control" placeholder="Management" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descrizione</label>
+        <input id="vlanDesc" class="form-control" placeholder="Opzionale">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalAddVlan">Annulla</button>
+      <button class="btn btn-primary" onclick="submitAddVlan()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function submitAddNetwork() {
+  const payload = {
+    address:      document.getElementById('netAddress').value.trim(),
+    cidr:         parseInt(document.getElementById('netCidr').value),
+    name:         document.getElementById('netName').value.trim(),
+    location:     document.getElementById('netLocation').value.trim(),
+    vlan_id:      parseInt(document.getElementById('netVlan').value) || null,
+    network_type: document.getElementById('netType').value,
+    status:       document.getElementById('netStatus').value,
+    country:      document.getElementById('netCountry').value.trim(),
+    site:         document.getElementById('netSite').value.trim(),
+    usage:        document.getElementById('netUsage').value.trim(),
+    zone:         document.getElementById('netZone').value.trim(),
+    gateway:      document.getElementById('netGateway').value.trim(),
+    description:  document.getElementById('netDesc').value.trim(),
+  };
+  if (!payload.address || !payload.cidr || !payload.name) {
+    showToast('Compila i campi obbligatori', 'error'); return;
+  }
+  await apiFetch('/ipam/api/networks', { method: 'POST', body: JSON.stringify(payload) });
+  showToast('Rete aggiunta con successo', 'success');
+  closeModal('modalAddNetwork');
+  setTimeout(function(){ window.location.reload(); }, 1000);
+}
+
+async function submitAddIP() {
+  const payload = {
+    ip_address:  document.getElementById('ipAddress').value.trim(),
+    hostname:    document.getElementById('ipHostname').value.trim(),
+    mac_address: document.getElementById('ipMac').value.trim(),
+    device_type: document.getElementById('ipDevType').value,
+    status:      document.getElementById('ipStatus').value,
+    description: document.getElementById('ipDesc').value.trim(),
+  };
+  if (!payload.ip_address) { showToast('Inserisci un indirizzo IP', 'error'); return; }
+  await apiFetch('/ipam/api/ip-records', { method: 'POST', body: JSON.stringify(payload) });
+  showToast('IP aggiunto con successo', 'success');
+  closeModal('modalAddIP');
+}
+
+async function submitAddVlan() {
+  const payload = {
+    vlan_id:     parseInt(document.getElementById('vlanId').value),
+    name:        document.getElementById('vlanName').value.trim(),
+    description: document.getElementById('vlanDesc').value.trim(),
+  };
+  if (!payload.vlan_id || !payload.name) { showToast('Compila i campi obbligatori', 'error'); return; }
+  await apiFetch('/ipam/api/vlans', { method: 'POST', body: JSON.stringify(payload) });
+  showToast('VLAN aggiunta', 'success');
+  closeModal('modalAddVlan');
+  setTimeout(function(){ window.location.reload(); }, 1000);
+}
+</script>
+{% endblock %}

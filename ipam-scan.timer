@@ -1,0 +1,10 @@
+[Unit]
+Description=IPAM Nightly Network Scan Timer
+Requires=ipam-scan.service
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

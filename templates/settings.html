@@ -1,0 +1,1545 @@
+{% extends 'base.html' %}
+{% block title %}Impostazioni{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:1.5rem">
+  <h1 style="display:flex;align-items:center;gap:.6rem;font-size:1.4rem;font-weight:700">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    Impostazioni
+  </h1>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:1.4rem;max-width:900px">
+
+<!-- ═══ 1. DNS ═══════════════════════════════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <h2 style="font-size:1rem;font-weight:600;margin:0 0 .3rem">Server DNS</h2>
+  <p style="color:var(--text-muted);font-size:.82rem;margin:0 0 1rem">
+    Usati per il reverse lookup PTR durante la scansione.
+    Se il primario risponde NXDOMAIN, viene interrogato il secondario.
+  </p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.9rem;align-items:end">
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Primario
+      <input type="text" id="dns_primary" placeholder="es. 192.168.1.1"
+             style="font-family:monospace;font-size:.9rem" class="form-control">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Secondario <span style="font-size:.75rem;color:var(--text-muted)">(usato se risposta NXDOMAIN)</span>
+      <input type="text" id="dns_secondary" placeholder="es. 192.168.1.2"
+             style="font-family:monospace;font-size:.9rem" class="form-control">
+    </label>
+  </div>
+  <div style="display:flex;gap:.6rem;align-items:center">
+    <button class="btn btn-primary" onclick="saveDns()">Salva</button>
+    <button class="btn btn-secondary" onclick="testDns(this)">Testa connessione</button>
+    <span id="dns_status" style="font-size:.82rem;color:var(--text-muted)"></span>
+  </div>
+  <div id="dns_test_result" style="display:none;margin-top:.9rem;padding:.8rem 1rem;
+       border-radius:6px;background:var(--bg-secondary);font-size:.83rem;line-height:1.6"></div>
+</section>
+
+<!-- ═══ 2. Probe TCP (bypass firewall) ═════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <h2 style="font-size:1rem;font-weight:600;margin:0 0 .3rem">Probe TCP — Bypass Firewall</h2>
+  <p style="color:var(--text-muted);font-size:.82rem;margin:0 0 1rem">
+    Se un host blocca il ping ICMP (regola firewall), lo scanner tenta una connessione TCP
+    sulle porte elencate. Un host che risponde su almeno una porta viene comunque marcato
+    come <strong>attivo</strong>, evitando falsi "disponibili".
+  </p>
+  <div style="display:flex;flex-direction:column;gap:.8rem;margin-bottom:.9rem">
+    <label style="display:flex;align-items:center;gap:.55rem;cursor:pointer;font-size:.92rem;font-weight:500">
+      <input type="checkbox" id="tcp_probe_enabled" class="check-toggle">
+      Abilita probe TCP come fallback al ping
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Porte da testare <span style="font-weight:400">(separate da virgola)</span>
+      <input type="text" id="tcp_probe_ports" placeholder="22,80,443,445,3389,135,8080,8443"
+             style="font-family:monospace;font-size:.9rem;max-width:380px" class="form-control">
+    </label>
+    <p style="color:var(--text-muted);font-size:.78rem;margin:0">
+      Porte tipiche: 22 SSH · 80 HTTP · 443 HTTPS · 445 SMB · 3389 RDP · 135 RPC · 8080/8443 HTTP alt
+    </p>
+  </div>
+  <div style="display:flex;gap:.6rem;align-items:center">
+    <button class="btn btn-primary" onclick="saveTcpProbe()">Salva</button>
+    <span id="tcp_probe_status" style="font-size:.82rem;color:var(--text-muted)"></span>
+  </div>
+</section>
+
+<!-- ═══ 3. Scansione Globale ═══════════════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <h2 style="font-size:1rem;font-weight:600;margin:0 0 .3rem">Scansione Globale</h2>
+  <p style="color:var(--text-muted);font-size:.82rem;margin:0 0 1rem">
+    Quando attiva, tutte le supernet con le relative subnet vengono scansionate ogni giorno all'orario indicato.
+  </p>
+  <div style="display:flex;align-items:center;gap:1.4rem;flex-wrap:wrap">
+    <label style="display:flex;align-items:center;gap:.55rem;cursor:pointer;font-size:.92rem;font-weight:500">
+      <input type="checkbox" id="global_scan_enabled" class="check-toggle"
+             onchange="globalScanToggle()">
+      Abilita scansione completa giornaliera
+    </label>
+    <label style="display:flex;align-items:center;gap:.5rem;font-size:.82rem;color:var(--text-muted)">
+      Orario
+      <input type="time" id="global_scan_time" value="02:00"
+             style="width:7rem" class="form-control">
+    </label>
+    <button class="btn btn-primary" onclick="saveGlobal()">Salva</button>
+    <span id="global_status" style="font-size:.82rem;color:var(--text-muted)"></span>
+  </div>
+</section>
+
+<!-- ═══ 3. Gruppi di Scansione ══════════════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+    <div>
+      <h2 style="font-size:1rem;font-weight:600;margin:0 0 .2rem">Gruppi di Scansione</h2>
+      <p style="color:var(--text-muted);font-size:.82rem;margin:0">
+        Definisci gruppi di supernet, subnet o range IP con orario di scansione dedicato.
+      </p>
+    </div>
+    <button class="btn btn-primary" onclick="openGroupModal()">+ Nuovo gruppo</button>
+  </div>
+
+  <!-- Tabella gruppi -->
+  <div style="overflow-x:auto">
+    <table class="data-table" style="width:100%">
+      <thead>
+        <tr>
+          <th>Nome</th>
+          <th>Tipo</th>
+          <th style="text-align:center">Elementi</th>
+          <th style="text-align:center">Orario</th>
+          <th style="text-align:center">Attivo</th>
+          <th style="text-align:right">Azioni</th>
+        </tr>
+      </thead>
+      <tbody id="groupsBody">
+        <tr id="groupsEmpty">
+          <td colspan="6" style="text-align:center;color:var(--text-muted);padding:2rem">
+            Nessun gruppo configurato
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ 4. Utenti Locali ════════════════════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+    <div>
+      <h2 style="font-size:1rem;font-weight:600;margin:0 0 .2rem">Utenti Locali</h2>
+      <p style="color:var(--text-muted);font-size:.82rem;margin:0">
+        Usati per il login diretto e come fallback quando LDAP non è raggiungibile.
+      </p>
+    </div>
+    <button class="btn btn-primary" onclick="openUserModal()">+ Nuovo utente</button>
+  </div>
+  <div style="overflow-x:auto">
+    <table class="data-table" style="width:100%">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Nome visualizzato</th>
+          <th style="text-align:center">Admin</th>
+          <th style="text-align:center">Attivo</th>
+          <th style="text-align:right">Azioni</th>
+        </tr>
+      </thead>
+      <tbody id="usersBody">
+        <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:2rem">Caricamento…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ 5. Log Accessi ══════════════════════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem">
+    <div>
+      <h2 style="font-size:1rem;font-weight:600;margin:0 0 .2rem">Log Accessi</h2>
+      <p style="color:var(--text-muted);font-size:.82rem;margin:0">
+        Ultimi accessi, logout ed errori di autenticazione &mdash; file <code>instance/auth.log</code>
+      </p>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center">
+      <select id="log_lines" class="form-control" style="font-size:.82rem;width:auto"
+              onchange="loadAuthLog()">
+        <option value="50">Ultime 50 righe</option>
+        <option value="200" selected>Ultime 200 righe</option>
+        <option value="500">Ultime 500 righe</option>
+      </select>
+      <button class="btn btn-secondary" onclick="loadAuthLog()" title="Aggiorna">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+  <div id="auth_log_wrap" style="background:var(--bg-primary);border:1px solid var(--border);
+       border-radius:6px;padding:.7rem 1rem;max-height:340px;overflow-y:auto;font-family:monospace;
+       font-size:.78rem;line-height:1.65;color:var(--text-muted)">
+    <span style="color:var(--text-muted)">Caricamento…</span>
+  </div>
+  <div id="auth_log_meta" style="font-size:.75rem;color:var(--text-muted);margin-top:.4rem"></div>
+</section>
+
+<!-- ═══ 6. LDAP / Active Directory ══════════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <h2 style="font-size:1rem;font-weight:600;margin:0 0 .3rem">Autenticazione LDAP</h2>
+  <p style="color:var(--text-muted);font-size:.82rem;margin:0 0 1.2rem">
+    Supporta Active Directory e OpenLDAP. Se il server non è raggiungibile si usa il login locale.
+  </p>
+
+  <label style="display:flex;align-items:center;gap:.55rem;cursor:pointer;font-size:.92rem;font-weight:500;margin-bottom:1rem">
+    <input type="checkbox" id="ldap_enabled" class="check-toggle">
+    Abilita autenticazione LDAP
+  </label>
+
+  <!-- Tipo server -->
+  <div style="display:flex;gap:1.4rem;margin-bottom:1.2rem">
+    <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer">
+      <input type="radio" name="ldap_server_type" id="ldap_type_ad" value="ad" onchange="updateLdapHints()">
+      Active Directory
+    </label>
+    <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer">
+      <input type="radio" name="ldap_server_type" id="ldap_type_openldap" value="openldap" onchange="updateLdapHints()">
+      OpenLDAP
+    </label>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.9rem;margin-bottom:.9rem">
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Server LDAP
+      <input type="text" id="ldap_server" class="form-control"
+             placeholder="ldap://dc01.phoenix.loc" style="font-family:monospace;font-size:.85rem">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Base DN
+      <input type="text" id="ldap_base_dn" class="form-control"
+             placeholder="DC=phoenix,DC=loc" style="font-family:monospace;font-size:.85rem">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Bind DN <span id="ldap_bind_dn_hint" style="font-size:.75rem">(account di servizio)</span>
+      <input type="text" id="ldap_bind_dn" class="form-control"
+             placeholder="CN=svc-ipam,CN=Users,DC=phoenix,DC=loc" style="font-family:monospace;font-size:.85rem">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Password Bind DN
+      <input type="password" id="ldap_bind_password" class="form-control"
+             placeholder="••••••••" style="font-size:.85rem">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Attributo utente
+      <input type="text" id="ldap_user_attr" class="form-control"
+             id="ldap_user_attr_input"
+             placeholder="sAMAccountName" style="font-family:monospace;font-size:.85rem">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      <span id="ldap_groups_label">Gruppi autorizzati</span>
+      <span style="font-size:.75rem;color:var(--text-muted)" id="ldap_groups_hint">(CN del gruppo; separati da virgola; vuoto = tutti)</span>
+      <input type="text" id="ldap_allowed_groups" class="form-control"
+             placeholder="GRP-IPAM-Admins" style="font-size:.85rem">
+    </label>
+  </div>
+
+  <!-- Nota tecnica contestuale -->
+  <p id="ldap_type_note" style="font-size:.78rem;color:var(--text-muted);margin:.2rem 0 1rem;padding:.5rem .7rem;
+     background:var(--bg-secondary);border-radius:6px;border-left:3px solid var(--accent)"></p>
+
+  <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem">
+    <button class="btn btn-primary" onclick="saveLdap()">Salva configurazione</button>
+    <button class="btn btn-secondary" onclick="showLdapTestPanel()">Testa connessione</button>
+    <span id="ldap_status" style="font-size:.82rem;color:var(--text-muted)"></span>
+  </div>
+
+  <!-- Pannello test LDAP -->
+  <div id="ldap_test_panel" style="display:none;border:1px solid var(--border);border-radius:8px;
+       padding:1rem 1.2rem;background:var(--bg-secondary);margin-top:.5rem">
+    <div style="font-size:.82rem;font-weight:600;color:var(--text-muted);margin-bottom:.7rem">
+      Test autenticazione utente
+    </div>
+    <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+      <input type="text" id="ldap_test_user" placeholder="username" class="form-control"
+             style="width:160px;font-size:.85rem">
+      <input type="password" id="ldap_test_pass" placeholder="password" class="form-control"
+             style="width:160px;font-size:.85rem">
+      <button class="btn btn-secondary" onclick="testLdap(this)">Verifica</button>
+    </div>
+    <div id="ldap_test_result" style="margin-top:.7rem;font-size:.83rem"></div>
+  </div>
+</section>
+
+<!-- ═══ DIAGNOSI SCANNER ════════════════════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <h2 style="font-size:1rem;font-weight:600;margin:0 0 .3rem">Diagnosi Scanner</h2>
+  <p style="color:var(--text-muted);font-size:.82rem;margin:0 0 1rem">
+    Testa ping, probe TCP e DNS su un singolo IP dal server. Utile per capire perché
+    uno scan non rileva un host attivo.
+  </p>
+  <div style="display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:.9rem">
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Indirizzo IP da testare
+      <input type="text" id="diag_ip" placeholder="es. 10.156.141.232"
+             style="font-family:monospace;font-size:.9rem;width:200px" class="form-control">
+    </label>
+    <button class="btn btn-primary" onclick="runDiag(this)">Testa</button>
+    <span id="diag_status" style="font-size:.82rem;color:var(--text-muted)"></span>
+  </div>
+  <div id="diag_result" style="display:none;padding:.9rem 1rem;border-radius:6px;
+       background:var(--bg-secondary);font-size:.83rem;line-height:1.7"></div>
+</section>
+
+<!-- ═══ SNMP DISCOVERY ═════════════════════════════════════════ -->
+<section class="settings-section">
+  <h2 class="settings-title">SNMP Discovery</h2>
+  <p style="font-size:.83rem;color:var(--text-muted);margin:.1rem 0 1.2rem">
+    Interroga router e switch via SNMP per arricchire automaticamente i record IP
+    con MAC address, nome switch e numero porta.
+  </p>
+
+  <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer;margin-bottom:1.1rem">
+    <input type="checkbox" id="snmp_enabled" class="check-toggle">
+    <span style="font-size:.9rem">Abilita SNMP Discovery</span>
+  </label>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.8rem">
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Community SNMP
+      <input type="text" id="snmp_community" class="form-control"
+             placeholder="public" style="font-family:monospace;font-size:.85rem">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Versione SNMP
+      <select id="snmp_version" class="form-control" style="font-size:.85rem">
+        <option value="2c">SNMPv2c</option>
+        <option value="1">SNMPv1</option>
+      </select>
+    </label>
+  </div>
+
+  <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted);margin-bottom:.8rem">
+    Router (indirizzi IP, separati da virgola)
+    <input type="text" id="snmp_routers" class="form-control"
+           placeholder="10.0.0.1, 10.0.0.2" style="font-family:monospace;font-size:.85rem">
+    <span style="font-size:.75rem;color:var(--text-muted)">
+      Usati per leggere la ARP table (<code>ipNetToMediaPhysAddress</code>)
+    </span>
+  </label>
+
+  <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted);margin-bottom:1rem">
+    Switch (indirizzi IP, separati da virgola)
+    <input type="text" id="snmp_switches" class="form-control"
+           placeholder="10.0.0.10, 10.0.0.11" style="font-family:monospace;font-size:.85rem">
+    <span style="font-size:.75rem;color:var(--text-muted)">
+      Usati per leggere la FDB (<code>dot1dTpFdbPort</code>) e i nomi delle porte
+    </span>
+  </label>
+
+  <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="saveSnmp()">Salva impostazioni</button>
+    <button class="btn btn-secondary" onclick="startSnmpDiscovery(this)" id="snmpDiscoverBtn">
+      Avvia Discovery
+    </button>
+    <span id="snmp_status" style="font-size:.82rem;color:var(--text-muted)"></span>
+  </div>
+
+  <div id="snmp_progress" style="display:none;margin-top:1rem;border:1px solid var(--border);
+       border-radius:8px;padding:.9rem 1.1rem;background:var(--bg-input);font-size:.82rem">
+    <div style="display:flex;align-items:center;gap:.7rem;margin-bottom:.5rem">
+      <span id="snmp_prog_icon" style="font-size:1.1rem">⏳</span>
+      <strong id="snmp_prog_title">Discovery in corso…</strong>
+    </div>
+    <div id="snmp_prog_detail" style="color:var(--text-muted);white-space:pre-line;font-size:.8rem"></div>
+  </div>
+</section>
+
+<!-- ═══ AMBIENTE PYTHON ════════════════════════════════════════ -->
+<section class="card" style="padding:1.4rem 1.6rem">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.9rem">
+    <div>
+      <h2 style="font-size:1rem;font-weight:600;margin:0 0 .2rem">Ambiente Python</h2>
+      <p style="color:var(--text-muted);font-size:.82rem;margin:0">
+        Diagnostica del virtualenv: versione Python, pacchetti installati e confronto con <code>requirements.txt</code>.
+      </p>
+    </div>
+    <button class="btn btn-secondary" onclick="loadVenvInfo(this)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:.3rem">
+        <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      </svg>
+      Aggiorna
+    </button>
+  </div>
+
+  <div id="venv_summary" style="display:none;margin-bottom:1rem;padding:.7rem 1rem;border-radius:6px;font-size:.83rem;line-height:1.6"></div>
+
+  <div id="venv_loading" style="color:var(--text-muted);font-size:.83rem">
+    Clicca "Aggiorna" per caricare le informazioni sull'ambiente Python.
+  </div>
+
+  <!-- Tabella pacchetti -->
+  <div id="venv_table_wrap" style="display:none;overflow-x:auto;margin-top:.6rem">
+    <table class="data-table" style="width:100%">
+      <thead>
+        <tr>
+          <th>Pacchetto (requirements.txt)</th>
+          <th>Versione richiesta</th>
+          <th>Versione installata</th>
+          <th style="text-align:center">Stato</th>
+        </tr>
+      </thead>
+      <tbody id="venv_req_body"></tbody>
+    </table>
+
+    <details style="margin-top:1.2rem">
+      <summary style="font-size:.83rem;color:var(--text-muted);cursor:pointer;user-select:none;padding:.3rem 0">
+        Tutti i pacchetti installati (<span id="venv_pkg_count">0</span>)
+      </summary>
+      <div style="overflow-x:auto;margin-top:.5rem">
+        <table class="data-table" style="width:100%">
+          <thead>
+            <tr><th>Nome</th><th>Versione</th></tr>
+          </thead>
+          <tbody id="venv_all_body"></tbody>
+        </table>
+      </div>
+    </details>
+  </div>
+</section>
+
+</div><!-- /container -->
+
+
+<!-- ═══ MODAL UTENTE LOCALE ═══════════════════════════════════ -->
+<div id="userModal" style="display:none;position:fixed;inset:0;z-index:1000;
+     background:rgba(0,0,0,.55);backdrop-filter:blur(3px);
+     align-items:center;justify-content:center">
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;
+              width:min(96vw,460px);box-shadow:0 20px 60px rgba(0,0,0,.4)">
+    <div style="padding:1.2rem 1.4rem;border-bottom:1px solid var(--border);
+                display:flex;align-items:center;justify-content:space-between">
+      <h3 id="userModalTitle" style="margin:0;font-size:1rem;font-weight:600">Nuovo utente</h3>
+      <button onclick="closeUserModal()"
+              style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.3rem">&times;</button>
+    </div>
+    <div style="padding:1.2rem 1.4rem;display:flex;flex-direction:column;gap:.85rem">
+      <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+        Username *
+        <input type="text" id="um_username" class="form-control" placeholder="es. mario.rossi">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+        Nome visualizzato
+        <input type="text" id="um_display" class="form-control" placeholder="es. Mario Rossi">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+        Password <span id="um_pw_hint" style="color:var(--text-muted);font-size:.75rem">(obbligatoria)</span>
+        <input type="password" id="um_password" class="form-control" placeholder="••••••••">
+      </label>
+      <div style="display:flex;gap:1.4rem">
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.88rem">
+          <input type="checkbox" id="um_admin" class="check-toggle"> Amministratore
+        </label>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.88rem">
+          <input type="checkbox" id="um_enabled" checked class="check-toggle"> Attivo
+        </label>
+      </div>
+      <span id="user_modal_err" style="color:#f85149;font-size:.83rem;min-height:1.2em"></span>
+    </div>
+    <div style="padding:.9rem 1.4rem;border-top:1px solid var(--border);
+                display:flex;justify-content:flex-end;gap:.6rem">
+      <button class="btn btn-secondary" onclick="closeUserModal()">Annulla</button>
+      <button class="btn btn-primary" id="userSaveBtn" onclick="saveUser()">Salva</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Suggest reti — fuori dal modal per evitare clip da overflow:auto -->
+<ul id="net_suggest"
+    style="display:none;position:fixed;z-index:2000;
+           list-style:none;padding:0;margin:0;
+           background:var(--bg-card);border:1px solid var(--border);
+           border-radius:6px;max-height:260px;overflow-y:auto;
+           box-shadow:0 6px 24px rgba(0,0,0,.4);min-width:300px">
+</ul>
+
+<!-- ═══ MODAL GRUPPO ════════════════════════════════════════════ -->
+<div id="groupModal" style="display:none;position:fixed;inset:0;z-index:1000;
+     background:rgba(0,0,0,.55);backdrop-filter:blur(3px);
+     align-items:center;justify-content:center">
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;
+              width:min(96vw,640px);max-height:90vh;display:flex;flex-direction:column;
+              box-shadow:0 20px 60px rgba(0,0,0,.4)">
+
+    <!-- Header modal -->
+    <div style="padding:1.2rem 1.4rem;border-bottom:1px solid var(--border);
+                display:flex;align-items:center;justify-content:space-between">
+      <h3 id="modalTitle" style="margin:0;font-size:1rem;font-weight:600"></h3>
+      <button onclick="closeGroupModal()"
+              style="background:none;border:none;color:var(--text-muted);cursor:pointer;
+                     font-size:1.3rem;line-height:1;padding:0 .2rem">&times;</button>
+    </div>
+
+    <!-- Body modal -->
+    <div style="padding:1.2rem 1.4rem;overflow-y:auto;flex:1">
+
+      <!-- Nome + Tipo + Orario -->
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:.7rem;margin-bottom:1rem;align-items:end">
+        <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+          Nome gruppo *
+          <input type="text" id="mg_name" placeholder="es. Sedi Nord"
+                 class="form-control" style="font-size:.9rem">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+          Tipo
+          <select id="mg_type" class="form-control" onchange="onTypeChange()"
+                  style="font-size:.9rem;min-width:120px">
+            <option value="supernet">Supernet</option>
+            <option value="subnet">Subnet</option>
+            <option value="ip_range">Range IP</option>
+          </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+          Orario (HH:MM)
+          <input type="time" id="mg_time" class="form-control" style="width:8rem">
+        </label>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:.55rem;font-size:.88rem;
+                    cursor:pointer;margin-bottom:1.2rem">
+        <input type="checkbox" id="mg_enabled" checked class="check-toggle">
+        Gruppo attivo
+      </label>
+
+      <!-- Elementi del gruppo -->
+      <div style="border-top:1px solid var(--border);padding-top:1rem">
+        <div style="font-size:.82rem;font-weight:600;color:var(--text-muted);
+                    margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.05em">
+          Elementi del gruppo
+        </div>
+
+        <!-- Lista elementi esistenti -->
+        <ul id="mg_items_list"
+            style="list-style:none;padding:0;margin:0 0 .8rem;display:flex;flex-direction:column;gap:.3rem">
+        </ul>
+
+        <!-- Aggiunta nuovo elemento -->
+        <div id="add_network_row"
+             style="display:flex;gap:.5rem;align-items:center">
+          <div style="position:relative;flex:1">
+            <input type="text" id="mg_net_search" placeholder="Cerca rete per nome o indirizzo…"
+                   class="form-control" style="font-size:.85rem;width:100%"
+                   oninput="searchNetworks(this.value)" autocomplete="off"
+                   onblur="setTimeout(hideSuggest,200)">
+          </div>
+          <button class="btn btn-secondary" onclick="addSelectedNetwork()">Aggiungi</button>
+        </div>
+        <div id="add_range_row" style="display:none;gap:.5rem;align-items:center">
+          <input type="text" id="mg_range_input" placeholder="es. 10.30.1.0/24  oppure  10.30.1.1-10.30.1.254"
+                 class="form-control" style="font-size:.85rem;flex:1">
+          <button class="btn btn-secondary" onclick="addRangeItem()">Aggiungi</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer modal -->
+    <div style="padding:1rem 1.4rem;border-top:1px solid var(--border);
+                display:flex;align-items:center;justify-content:space-between">
+      <span id="modal_err" style="color:#f85149;font-size:.83rem"></span>
+      <div style="display:flex;gap:.6rem">
+        <button class="btn btn-secondary" onclick="closeGroupModal()">Annulla</button>
+        <button class="btn btn-primary" onclick="saveGroup()">Salva gruppo</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<style>
+.form-control {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: .45rem .7rem;
+  outline: none;
+  transition: border-color .15s;
+}
+.form-control:focus { border-color: var(--accent); }
+.check-toggle { width: 1rem; height: 1rem; cursor: pointer; accent-color: var(--accent); }
+.type-badge {
+  display: inline-block;
+  padding: .15rem .5rem;
+  border-radius: 4px;
+  font-size: .74rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+}
+.badge-supernet { background: rgba(31,111,235,.18); color: #58a6ff; }
+.badge-subnet   { background: rgba(63,185,80,.18);  color: #3fb950; }
+.badge-range    { background: rgba(210,153,34,.18); color: #d2a31a; }
+.net-suggest-item {
+  padding: .45rem .8rem;
+  cursor: pointer;
+  font-size: .84rem;
+  display: flex;
+  justify-content: space-between;
+  gap: .5rem;
+}
+.net-suggest-item:hover { background: var(--bg-secondary); }
+.item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .3rem .6rem;
+  background: var(--bg-secondary);
+  border-radius: 5px;
+  font-size: .84rem;
+}
+.item-row .del-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 .2rem;
+}
+.item-row .del-btn:hover { color: #f85149; }
+</style>
+
+<script>
+var _cfg    = {};      // configurazione corrente
+var _groups = [];      // lista gruppi
+var _editId = null;    // id gruppo in editing (null = nuovo)
+var _selNet = null;    // rete selezionata nel suggest
+
+// ── Inizializzazione ──────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  loadSettings();
+  loadGroups();
+});
+
+function loadSettings() {
+  fetch('/ipam/api/settings')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      _cfg = d;
+      document.getElementById('dns_primary').value     = d.dns_primary   || '';
+      document.getElementById('dns_secondary').value   = d.dns_secondary || '';
+      document.getElementById('global_scan_enabled').checked = !!d.global_scan_enabled;
+      document.getElementById('global_scan_time').value = d.global_scan_time || '02:00';
+      document.getElementById('tcp_probe_enabled').checked = (d.tcp_probe_enabled !== false);
+      document.getElementById('tcp_probe_ports').value  = d.tcp_probe_ports || '22,80,443,445,3389,135,8080,8443';
+    });
+}
+
+function saveTcpProbe() {
+  var en    = document.getElementById('tcp_probe_enabled').checked;
+  var ports = document.getElementById('tcp_probe_ports').value.trim();
+  fetch('/ipam/api/settings', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({tcp_probe_enabled: en, tcp_probe_ports: ports})
+  }).then(function() {
+    showStatus('tcp_probe_status', 'Salvato', 'ok');
+  });
+}
+
+// ── Diagnosi Scanner ──────────────────────────────────────────────
+function runDiag(btn) {
+  var ip = document.getElementById('diag_ip').value.trim();
+  if (!ip) { showStatus('diag_status', 'Inserisci un IP', 'error'); return; }
+  var res = document.getElementById('diag_result');
+  res.style.display = 'none';
+  var old = btn.textContent;
+  btn.textContent = 'Test in corso…';
+  btn.disabled = true;
+
+  fetch('/ipam/api/scan/test-ip?ip=' + encodeURIComponent(ip))
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.error) {
+        res.innerHTML = '<span style="color:#f85149">Errore: ' + esc(d.error) + '</span>';
+        res.style.display = 'block';
+        return;
+      }
+
+      var ok  = '<span style="color:#3fb950;font-weight:700">&#10003;</span>';
+      var ko  = '<span style="color:#f85149;font-weight:700">&#10007;</span>';
+      var na  = '<span style="color:var(--text-muted)">—</span>';
+      var icon = function(b) { return b ? ok : ko; };
+
+      // Processo
+      var html = '<div style="margin-bottom:.6rem;color:var(--text-muted);font-size:.78rem">'
+        + 'Processo: <code>' + esc(d.process.user) + '</code> &nbsp;PID ' + d.process.pid
+        + '</div>';
+
+      // Ping
+      html += '<div style="font-weight:600;margin-bottom:.3rem">Ping</div>'
+        + '<div style="margin-bottom:.3rem">' + icon(d.ping.alive)
+        + ' &nbsp;Binario: <code>' + esc(d.ping.binary) + '</code>'
+        + ' &nbsp;Permessi: <code>' + esc(d.ping.perms || '?') + '</code>'
+        + ' &nbsp;Return code: <code>' + d.ping.returncode + '</code>'
+        + (d.ping.error ? ' &nbsp;<span style="color:#f85149">Errore: ' + esc(d.ping.error) + '</span>' : '')
+        + '</div>';
+      if (d.ping.output) {
+        html += '<pre style="margin:.2rem 0 .6rem;padding:.5rem .7rem;background:var(--bg-primary);'
+          + 'border-radius:4px;font-size:.78rem;overflow-x:auto;white-space:pre-wrap">'
+          + esc(d.ping.output) + '</pre>';
+      }
+
+      // TCP probe
+      html += '<div style="font-weight:600;margin-bottom:.3rem">Probe TCP</div>'
+        + '<div style="margin-bottom:.3rem">' + icon(d.tcp_probe.enabled)
+        + ' &nbsp;' + (d.tcp_probe.enabled ? 'Abilitato' : 'Disabilitato') + '</div>';
+      if (d.tcp_probe.enabled && d.tcp_probe.ports.length) {
+        html += '<div style="display:flex;flex-wrap:wrap;gap:.3rem .6rem;margin-bottom:.6rem">';
+        d.tcp_probe.ports.forEach(function(p) {
+          var col = (p.result === 'open') ? '#3fb950'
+                  : (p.result === 'refused') ? '#e3b341'
+                  : 'var(--text-muted)';
+          html += '<span style="font-family:monospace;font-size:.78rem;color:' + col + '">'
+               + p.port + ' <span style="font-size:.72rem">(' + esc(p.result) + ')</span></span>';
+        });
+        html += '</div>';
+      }
+
+      // DNS
+      html += '<div style="font-weight:600;margin-bottom:.3rem">DNS PTR</div>'
+        + '<div style="margin-bottom:.6rem">'
+        + (d.dns.hostname ? ok + ' &nbsp;<code>' + esc(d.dns.hostname) + '</code>'
+                          : na + ' &nbsp;Nessun PTR trovato')
+        + ' &nbsp;<span style="color:var(--text-muted);font-size:.78rem">server: '
+        + esc((d.dns.servers || []).join(', ')) + '</span>'
+        + '</div>';
+
+      // Risultato finale
+      var finColor = d.overall_alive ? '#3fb950' : '#f85149';
+      var finMsg   = d.overall_alive
+        ? 'Host RILEVATO — verrebbe segnato come <strong>attivo</strong>'
+        : 'Host NON rilevato — verrebbe segnato come <strong>disponibile</strong>';
+      html += '<div style="margin-top:.4rem;padding:.5rem .8rem;border-radius:4px;'
+        + 'border-left:3px solid ' + finColor + ';color:' + finColor + '">' + finMsg + '</div>';
+
+      res.innerHTML = html;
+      res.style.display = 'block';
+    })
+    .catch(function(e) {
+      res.innerHTML = '<span style="color:#f85149">Errore di rete: ' + esc(String(e)) + '</span>';
+      res.style.display = 'block';
+    })
+    .finally(function() {
+      btn.textContent = old;
+      btn.disabled = false;
+    });
+}
+
+function loadGroups() {
+  fetch('/ipam/api/settings/scan-groups')
+    .then(function(r){ return r.json(); })
+    .then(function(groups) {
+      _groups = groups;
+      renderGroups();
+    });
+}
+
+// ── DNS ───────────────────────────────────────────────────────────
+function saveDns() {
+  var p = document.getElementById('dns_primary').value.trim();
+  var s = document.getElementById('dns_secondary').value.trim();
+  fetch('/ipam/api/settings', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({dns_primary: p, dns_secondary: s})
+  }).then(function() {
+    showStatus('dns_status', 'Salvato', 'ok');
+  });
+}
+
+function testDns(btn) {
+  var old = btn.textContent;
+  btn.textContent = 'Test in corso…';
+  btn.disabled = true;
+  var res = document.getElementById('dns_test_result');
+  res.style.display = 'none';
+
+  // Prima salva i valori attuali, poi testa
+  var p = document.getElementById('dns_primary').value.trim();
+  var s = document.getElementById('dns_secondary').value.trim();
+  fetch('/ipam/api/settings', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({dns_primary: p, dns_secondary: s})
+  }).then(function() {
+    return fetch('/ipam/api/settings/dns/test');
+  }).then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.error) {
+        res.innerHTML = '<span style="color:#f85149">Errore: ' + esc(d.error) + '</span>';
+        res.style.display = 'block';
+        return;
+      }
+      var html = '';
+      ['primary','secondary'].forEach(function(k) {
+        var r2 = d[k];
+        if (!r2) return;
+        var icon = r2.ok ? '&#10003;' : '&#10007;';
+        var col  = r2.ok ? '#3fb950' : '#f85149';
+        html += '<div style="display:flex;gap:.8rem;align-items:baseline">'
+              + '<span style="color:' + col + ';font-weight:700">' + icon + '</span>'
+              + '<span style="color:var(--text-muted);min-width:80px">'
+              + (k === 'primary' ? 'Primario' : 'Secondario') + '</span>'
+              + '<code style="color:var(--text-primary)">' + esc(r2.server) + '</code>'
+              + '<span style="color:var(--text-muted)"> — ' + esc(r2.detail) + '</span>'
+              + '</div>';
+      });
+      res.innerHTML = html;
+      res.style.display = 'block';
+    })
+    .finally(function() {
+      btn.textContent = old;
+      btn.disabled    = false;
+    });
+}
+
+// ── Scansione Globale ─────────────────────────────────────────────
+function globalScanToggle() {
+  /* solo aggiorna UI, il salvataggio è esplicito */
+}
+
+function saveGlobal() {
+  var en = document.getElementById('global_scan_enabled').checked;
+  var t  = document.getElementById('global_scan_time').value;
+  fetch('/ipam/api/settings', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({global_scan_enabled: en, global_scan_time: t})
+  }).then(function() {
+    showStatus('global_status', 'Salvato', 'ok');
+  });
+}
+
+// ── Gruppi — render ───────────────────────────────────────────────
+var TYPE_LABEL = { supernet: 'Supernet', subnet: 'Subnet', ip_range: 'Range IP' };
+var TYPE_BADGE = { supernet: 'badge-supernet', subnet: 'badge-subnet', ip_range: 'badge-range' };
+
+function renderGroups() {
+  var tbody = document.getElementById('groupsBody');
+  tbody.innerHTML = '';
+  if (!_groups.length) {
+    tbody.innerHTML = '<tr id="groupsEmpty"><td colspan="6" style="text-align:center;color:var(--text-muted);padding:2rem">Nessun gruppo configurato</td></tr>';
+    return;
+  }
+  _groups.forEach(function(g) {
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td style="font-weight:500">' + esc(g.name) + '</td>'
+      + '<td><span class="type-badge ' + (TYPE_BADGE[g.group_type]||'') + '">'
+      + esc(TYPE_LABEL[g.group_type] || g.group_type) + '</span></td>'
+      + '<td style="text-align:center;color:var(--text-muted)">' + g.items.length + '</td>'
+      + '<td style="text-align:center;font-family:monospace;font-size:.85rem">'
+      + (g.schedule_time || '<span style="color:var(--text-muted)">—</span>') + '</td>'
+      + '<td style="text-align:center">'
+      + (g.enabled
+          ? '<span style="color:#3fb950;font-size:1.1rem">&#10003;</span>'
+          : '<span style="color:var(--text-muted)">&#10007;</span>')
+      + '</td>'
+      + '<td style="text-align:right">'
+      + '<div style="display:flex;gap:.4rem;justify-content:flex-end">'
+      + '<button class="btn btn-secondary" style="padding:.28rem .6rem;font-size:.8rem" onclick="runGroup(' + g.id + ',this)" title="Avvia ora">&#9654;</button>'
+      + '<button class="btn btn-secondary" style="padding:.28rem .6rem;font-size:.8rem" onclick="editGroup(' + g.id + ')" title="Modifica">&#9998;</button>'
+      + '<button class="btn btn-secondary" style="padding:.28rem .6rem;font-size:.8rem;color:#f85149" onclick="deleteGroup(' + g.id + ',\'' + esc(g.name) + '\')" title="Elimina">&#10005;</button>'
+      + '</div></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Gruppi — modal ────────────────────────────────────────────────
+// _modalItems : tutti gli elementi visibili nel modal (con .id se già su server)
+// _itemsToDelete : elementi esistenti rimossi (inviati al server solo al Salva)
+var _modalItems    = [];
+var _itemsToDelete = [];
+
+function openGroupModal(g) {
+  _editId        = g ? g.id : null;
+  _modalItems    = g ? JSON.parse(JSON.stringify(g.items)) : [];
+  _itemsToDelete = [];
+  _selNet        = null;
+
+  document.getElementById('modalTitle').textContent = g ? 'Modifica gruppo' : 'Nuovo gruppo';
+  document.getElementById('mg_name').value          = g ? g.name : '';
+  document.getElementById('mg_type').value          = g ? g.group_type : 'subnet';
+  document.getElementById('mg_time').value          = g ? (g.schedule_time || '') : '';
+  document.getElementById('mg_enabled').checked     = g ? g.enabled : true;
+  document.getElementById('modal_err').textContent  = '';
+  document.getElementById('mg_net_search').value    = '';
+  var ri = document.getElementById('mg_range_input');
+  if (ri) ri.value = '';
+  hideSuggest();
+  onTypeChange();
+  renderModalItems();
+  var saveBtn = document.querySelector('#groupModal .btn-primary');
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salva gruppo'; }
+  document.getElementById('groupModal').style.display = 'flex';
+}
+
+function closeGroupModal() {
+  document.getElementById('groupModal').style.display = 'none';
+  hideSuggest();
+}
+
+function editGroup(id) {
+  var g = _groups.find(function(x){ return x.id === id; });
+  if (g) openGroupModal(g);
+}
+
+function onTypeChange() {
+  var t = document.getElementById('mg_type').value;
+  document.getElementById('add_network_row').style.display = (t !== 'ip_range') ? 'flex' : 'none';
+  document.getElementById('add_range_row').style.display   = (t === 'ip_range')  ? 'flex' : 'none';
+  document.getElementById('mg_net_search').placeholder =
+    t === 'supernet' ? 'Cerca supernet per nome o indirizzo…'
+                     : 'Cerca subnet per nome o indirizzo…';
+}
+
+function renderModalItems() {
+  var ul = document.getElementById('mg_items_list');
+  ul.innerHTML = '';
+  _modalItems.forEach(function(it, idx) {
+    var li = document.createElement('li');
+    li.className = 'item-row';
+    li.innerHTML = '<span>' + esc(it.label || it.ip_range || '') + '</span>'
+      + '<button class="del-btn" onclick="removeModalItem(' + idx + ')">&#10005;</button>';
+    ul.appendChild(li);
+  });
+}
+
+function removeModalItem(idx) {
+  var it = _modalItems[idx];
+  // Se l'elemento esiste già su server (ha .id), lo segniamo per la cancellazione
+  // ma lo rimuoviamo dal server solo al click "Salva gruppo"
+  if (it.id) {
+    _itemsToDelete.push(it);
+  }
+  _modalItems.splice(idx, 1);
+  renderModalItems();
+}
+
+// ── Ricerca reti ──────────────────────────────────────────────────
+var _searchTimer = null;
+
+function searchNetworks(q) {
+  clearTimeout(_searchTimer);
+  if (!q || q.length < 2) { hideSuggest(); return; }
+  var t = document.getElementById('mg_type').value;
+  var typeParam = (t === 'supernet') ? 'supernet' : 'subnet';
+  _searchTimer = setTimeout(function() {
+    fetch('/ipam/api/networks?type=' + typeParam + '&q=' + encodeURIComponent(q))
+      .then(function(r){ return r.json(); })
+      .then(function(nets) { showSuggest(nets.slice(0, 20)); });
+  }, 250);
+}
+
+function showSuggest(nets) {
+  var ul  = document.getElementById('net_suggest');
+  var inp = document.getElementById('mg_net_search');
+  ul.innerHTML = '';
+  if (!nets.length) { ul.style.display = 'none'; return; }
+  nets.forEach(function(n) {
+    var li = document.createElement('li');
+    li.className = 'net-suggest-item';
+    li.innerHTML = '<span>' + esc(n.name) + '</span>'
+      + '<code style="color:var(--text-muted);font-size:.8rem">' + esc(n.address+'/'+n.cidr) + '</code>';
+    li.onmousedown = function(e) { e.preventDefault(); };
+    li.onclick = function() {
+      _selNet   = n;
+      inp.value = n.name + ' (' + n.address + '/' + n.cidr + ')';
+      hideSuggest();
+    };
+    ul.appendChild(li);
+  });
+  var rect = inp.getBoundingClientRect();
+  ul.style.top   = (rect.bottom + 4) + 'px';
+  ul.style.left  = rect.left + 'px';
+  ul.style.width = rect.width + 'px';
+  ul.style.display = 'block';
+}
+
+function hideSuggest() {
+  document.getElementById('net_suggest').style.display = 'none';
+}
+
+document.addEventListener('click', function(e) {
+  var inp = document.getElementById('mg_net_search');
+  var ul  = document.getElementById('net_suggest');
+  if (inp && ul && e.target !== inp && !ul.contains(e.target)) hideSuggest();
+});
+
+// Aggiunge rete selezionata alla lista locale (NON invia al server subito)
+function addSelectedNetwork() {
+  if (!_selNet) return;
+  var already = _modalItems.find(function(x){ return x.network_id === _selNet.id; });
+  if (already) {
+    _selNet = null;
+    document.getElementById('mg_net_search').value = '';
+    return;
+  }
+  _modalItems.push({
+    network_id: _selNet.id,
+    ip_range:   null,
+    label:      _selNet.name + ' (' + _selNet.address + '/' + _selNet.cidr + ')',
+  });
+  renderModalItems();
+  _selNet = null;
+  document.getElementById('mg_net_search').value = '';
+}
+
+// Aggiunge range IP alla lista locale (NON invia al server subito)
+function addRangeItem() {
+  var val = document.getElementById('mg_range_input').value.trim();
+  if (!val) return;
+  _modalItems.push({network_id: null, ip_range: val, label: val});
+  renderModalItems();
+  document.getElementById('mg_range_input').value = '';
+}
+
+// Salva gruppo: prima metadati, poi cancellazioni, poi aggiunte — tutto in sequenza
+function saveGroup() {
+  var name = document.getElementById('mg_name').value.trim();
+  if (!name) {
+    document.getElementById('modal_err').textContent = 'Il nome è obbligatorio';
+    return;
+  }
+
+  var saveBtn = document.querySelector('#groupModal .btn-primary');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Salvataggio…'; }
+
+  var payload = {
+    name:          name,
+    group_type:    document.getElementById('mg_type').value,
+    schedule_time: document.getElementById('mg_time').value.trim() || null,
+    enabled:       document.getElementById('mg_enabled').checked,
+  };
+
+  var url    = _editId ? '/ipam/api/settings/scan-groups/' + _editId : '/ipam/api/settings/scan-groups';
+  var method = _editId ? 'PUT' : 'POST';
+
+  // Passo 1: salva/aggiorna il gruppo
+  fetch(url, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)})
+    .then(function(r){ return r.json(); })
+    .then(function(g) {
+      if (g.error) {
+        document.getElementById('modal_err').textContent = g.error;
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salva gruppo'; }
+        return;
+      }
+
+      var groupId = g.id;
+
+      // Passo 2: elimina gli elementi rimossi (solo quelli con .id = già su server)
+      var delPromises = _itemsToDelete
+        .filter(function(it){ return it.id; })
+        .map(function(it){
+          return fetch('/ipam/api/settings/scan-groups/' + groupId + '/items/' + it.id,
+                       {method:'DELETE'});
+        });
+
+      // Passo 3: aggiungi gli elementi nuovi (quelli senza .id = non ancora su server)
+      var addItems = _modalItems.filter(function(it){ return !it.id; });
+      var addPromises = addItems.map(function(it){
+        return fetch('/ipam/api/settings/scan-groups/' + groupId + '/items', {
+          method:  'POST',
+          headers: {'Content-Type':'application/json'},
+          body:    JSON.stringify({
+            network_id: it.network_id || null,
+            ip_range:   it.ip_range   || null,
+          }),
+        });
+      });
+
+      return Promise.all(delPromises.concat(addPromises));
+    })
+    .then(function() {
+      closeGroupModal();
+      loadGroups();
+    })
+    .catch(function(err) {
+      document.getElementById('modal_err').textContent = 'Errore: ' + err;
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salva gruppo'; }
+    });
+}
+
+function deleteGroup(id, name) {
+  if (!confirm('Eliminare il gruppo "' + name + '"?')) return;
+  fetch('/ipam/api/settings/scan-groups/' + id, {method:'DELETE'})
+    .then(function() { loadGroups(); });
+}
+
+function runGroup(id, btn) {
+  var old = btn.innerHTML;
+  btn.innerHTML = '…';
+  btn.disabled = true;
+  fetch('/ipam/api/settings/scan-groups/' + id + '/run', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      btn.innerHTML = '&#10003;';
+      setTimeout(function() { btn.innerHTML = old; btn.disabled = false; }, 2000);
+    })
+    .catch(function() {
+      btn.innerHTML = '&#10007;';
+      setTimeout(function() { btn.innerHTML = old; btn.disabled = false; }, 2000);
+    });
+}
+
+// ── Utility ───────────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showStatus(id, msg, type) {
+  var el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#3fb950' : '#f85149';
+  setTimeout(function() { el.textContent = ''; }, 3000);
+}
+
+// ── Utenti Locali ─────────────────────────────────────────────────
+var _editUserId = null;
+
+function loadUsers() {
+  fetch('/ipam/api/settings/local-users')
+    .then(function(r) { return r.json(); })
+    .then(function(users) {
+      var tbody = document.getElementById('usersBody');
+      if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:2rem">Nessun utente</td></tr>';
+        return;
+      }
+      tbody.innerHTML = users.map(function(u) {
+        return '<tr>' +
+          '<td style="font-family:monospace;font-size:.9rem">' + esc(u.username) + '</td>' +
+          '<td>' + esc(u.display_name || '—') + '</td>' +
+          '<td style="text-align:center">' + (u.is_admin ? '<span style="color:#3fb950">&#10003;</span>' : '<span style="color:var(--text-muted)">—</span>') + '</td>' +
+          '<td style="text-align:center">' + (u.enabled ? '<span style="color:#3fb950">&#10003;</span>' : '<span style="color:#f85149">&#10007;</span>') + '</td>' +
+          '<td style="text-align:right">' +
+            '<button class="btn btn-secondary" style="padding:.25rem .55rem;font-size:.78rem;margin-right:.3rem" onclick="openUserModal(' + u.id + ')">Modifica</button>' +
+            '<button class="btn btn-secondary" style="padding:.25rem .55rem;font-size:.78rem;color:#f85149" onclick="deleteUser(' + u.id + ',\'' + esc(u.username) + '\')">Elimina</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    })
+    .catch(function() {
+      document.getElementById('usersBody').innerHTML =
+        '<tr><td colspan="5" style="text-align:center;color:#f85149;padding:2rem">Errore caricamento</td></tr>';
+    });
+}
+
+function openUserModal(uid) {
+  _editUserId = uid || null;
+  document.getElementById('userModalTitle').textContent = uid ? 'Modifica utente' : 'Nuovo utente';
+  document.getElementById('um_username').value  = '';
+  document.getElementById('um_display').value   = '';
+  document.getElementById('um_password').value  = '';
+  document.getElementById('um_admin').checked   = false;
+  document.getElementById('um_enabled').checked = true;
+  document.getElementById('user_modal_err').textContent = '';
+  document.getElementById('um_username').disabled = !!uid;
+  document.getElementById('um_pw_hint').textContent = uid ? '(lasciare vuota per non cambiare)' : '(obbligatoria)';
+
+  if (uid) {
+    fetch('/ipam/api/settings/local-users')
+      .then(function(r) { return r.json(); })
+      .then(function(users) {
+        var u = users.find(function(x) { return x.id === uid; });
+        if (u) {
+          document.getElementById('um_username').value  = u.username;
+          document.getElementById('um_display').value   = u.display_name;
+          document.getElementById('um_admin').checked   = u.is_admin;
+          document.getElementById('um_enabled').checked = u.enabled;
+        }
+      });
+  }
+  var m = document.getElementById('userModal');
+  m.style.display = 'flex';
+}
+
+function closeUserModal() {
+  document.getElementById('userModal').style.display = 'none';
+  _editUserId = null;
+}
+
+function saveUser() {
+  var btn  = document.getElementById('userSaveBtn');
+  var errEl = document.getElementById('user_modal_err');
+  errEl.textContent = '';
+  btn.disabled = true; btn.textContent = 'Salvo…';
+
+  var data = {
+    display_name: document.getElementById('um_display').value.trim(),
+    is_admin:     document.getElementById('um_admin').checked,
+    enabled:      document.getElementById('um_enabled').checked,
+  };
+  var pw = document.getElementById('um_password').value;
+
+  if (_editUserId) {
+    if (pw) data.password = pw;
+    fetch('/ipam/api/settings/local-users/' + _editUserId, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(data),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { errEl.textContent = d.error; btn.disabled=false; btn.textContent='Salva'; return; }
+      closeUserModal(); loadUsers();
+    })
+    .catch(function(e) { errEl.textContent='Errore: '+e; btn.disabled=false; btn.textContent='Salva'; });
+  } else {
+    data.username = document.getElementById('um_username').value.trim();
+    data.password = pw;
+    if (!data.username || !data.password) {
+      errEl.textContent = 'Username e password obbligatori'; btn.disabled=false; btn.textContent='Salva'; return;
+    }
+    fetch('/ipam/api/settings/local-users', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(data),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { errEl.textContent = d.error; btn.disabled=false; btn.textContent='Salva'; return; }
+      closeUserModal(); loadUsers();
+    })
+    .catch(function(e) { errEl.textContent='Errore: '+e; btn.disabled=false; btn.textContent='Salva'; });
+  }
+}
+
+function deleteUser(uid, username) {
+  if (!confirm('Eliminare l\'utente "' + username + '"?')) return;
+  fetch('/ipam/api/settings/local-users/' + uid, {method:'DELETE'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { alert(d.error); return; }
+      loadUsers();
+    });
+}
+
+// ── LDAP ─────────────────────────────────────────────────────────
+function loadLdap() {
+  fetch('/ipam/api/settings/ldap')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      document.getElementById('ldap_enabled').checked        = d.ldap_enabled === '1';
+      document.getElementById('ldap_server').value           = d.ldap_server        || '';
+      document.getElementById('ldap_base_dn').value          = d.ldap_base_dn       || '';
+      document.getElementById('ldap_bind_dn').value          = d.ldap_bind_dn       || '';
+      document.getElementById('ldap_bind_password').value    = d.ldap_bind_password || '';
+      document.getElementById('ldap_user_attr').value        = d.ldap_user_attr     || '';
+      document.getElementById('ldap_allowed_groups').value   = d.ldap_allowed_groups || '';
+      var stype = d.ldap_server_type || 'ad';
+      document.getElementById(stype === 'openldap' ? 'ldap_type_openldap' : 'ldap_type_ad').checked = true;
+      updateLdapHints();
+    });
+}
+
+function saveLdap() {
+  var stype = document.querySelector('input[name="ldap_server_type"]:checked');
+  var data = {
+    ldap_enabled:        document.getElementById('ldap_enabled').checked ? '1' : '0',
+    ldap_server_type:    stype ? stype.value : 'ad',
+    ldap_server:         document.getElementById('ldap_server').value.trim(),
+    ldap_base_dn:        document.getElementById('ldap_base_dn').value.trim(),
+    ldap_bind_dn:        document.getElementById('ldap_bind_dn').value.trim(),
+    ldap_bind_password:  document.getElementById('ldap_bind_password').value,
+    ldap_user_attr:      document.getElementById('ldap_user_attr').value.trim(),
+    ldap_allowed_groups: document.getElementById('ldap_allowed_groups').value.trim(),
+  };
+  fetch('/ipam/api/settings/ldap', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(data),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function() { showStatus('ldap_status', 'Salvato', 'ok'); });
+}
+
+function updateLdapHints() {
+  var isOL = document.getElementById('ldap_type_openldap').checked;
+  document.getElementById('ldap_user_attr').placeholder    = isOL ? 'uid' : 'sAMAccountName';
+  document.getElementById('ldap_bind_dn').placeholder      = isOL
+    ? 'cn=admin,dc=esempio,dc=it  (vuoto = bind anonimo)'
+    : 'CN=svc-ipam,CN=Users,DC=phoenix,DC=loc';
+  document.getElementById('ldap_bind_dn_hint').textContent = isOL
+    ? '(lascia vuoto per bind anonimo)'
+    : '(account di servizio)';
+  document.getElementById('ldap_groups_label').textContent = isOL
+    ? 'Gruppi LDAP autorizzati'
+    : 'Gruppi AD autorizzati';
+  document.getElementById('ldap_allowed_groups').placeholder = isOL
+    ? 'ipam-admins, ipam-users'
+    : 'GRP-IPAM-Admins, GRP-IPAM-Users';
+  document.getElementById('ldap_type_note').textContent = isOL
+    ? 'OpenLDAP: la verifica gruppo cerca nei tipi posixGroup (memberUid), groupOfNames (member) e groupOfUniqueNames (uniqueMember).'
+    : 'Active Directory: verifica appartenenza diretta via memberOf e gruppi annidati via LDAP_MATCHING_RULE_IN_CHAIN.';
+}
+
+function showLdapTestPanel() {
+  var p = document.getElementById('ldap_test_panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  document.getElementById('ldap_test_result').textContent = '';
+}
+
+function testLdap(btn) {
+  var username = document.getElementById('ldap_test_user').value.trim();
+  var password = document.getElementById('ldap_test_pass').value;
+  var resultEl = document.getElementById('ldap_test_result');
+  if (!username || !password) { resultEl.textContent = 'Inserire username e password'; return; }
+  btn.disabled = true; btn.textContent = '…';
+  resultEl.textContent = 'Test in corso…';
+  resultEl.style.color = 'var(--text-muted)';
+  fetch('/ipam/api/settings/ldap/test', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({username: username, password: password}),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    btn.disabled = false; btn.textContent = 'Verifica';
+    resultEl.style.color     = d.ok ? '#3fb950' : '#f85149';
+    resultEl.style.whiteSpace = 'pre-line';
+    resultEl.textContent = d.detail || (d.ok ? 'OK' : 'Fallito');
+  })
+  .catch(function(e) {
+    btn.disabled = false; btn.textContent = 'Verifica';
+    resultEl.textContent = 'Errore: ' + e; resultEl.style.color = '#f85149';
+  });
+}
+
+// ── SNMP Discovery ────────────────────────────────────────────────
+fetch('/ipam/api/settings/snmp')
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    document.getElementById('snmp_enabled').checked   = d.snmp_enabled === '1';
+    document.getElementById('snmp_community').value   = d.snmp_community || '';
+    document.getElementById('snmp_version').value     = d.snmp_version   || '2c';
+    document.getElementById('snmp_routers').value     = d.snmp_routers   || '';
+    document.getElementById('snmp_switches').value    = d.snmp_switches  || '';
+  });
+
+function saveSnmp() {
+  var data = {
+    snmp_enabled:   document.getElementById('snmp_enabled').checked ? '1' : '0',
+    snmp_community: document.getElementById('snmp_community').value.trim(),
+    snmp_version:   document.getElementById('snmp_version').value,
+    snmp_routers:   document.getElementById('snmp_routers').value.trim(),
+    snmp_switches:  document.getElementById('snmp_switches').value.trim(),
+  };
+  fetch('/ipam/api/settings/snmp', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(data),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function() { showStatus('snmp_status', 'Salvato', 'ok'); });
+}
+
+var _snmpPollTimer = null;
+
+function startSnmpDiscovery(btn) {
+  var enabled = document.getElementById('snmp_enabled').checked;
+  if (!enabled) {
+    showStatus('snmp_status', 'Abilita prima la SNMP Discovery', 'err');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '…';
+  fetch('/ipam/api/snmp/discover', {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.ok) {
+        btn.disabled = false; btn.textContent = 'Avvia Discovery';
+        showStatus('snmp_status', d.error || 'Errore avvio', 'err');
+        return;
+      }
+      document.getElementById('snmp_progress').style.display = 'block';
+      document.getElementById('snmp_prog_icon').textContent  = '⏳';
+      document.getElementById('snmp_prog_title').textContent = 'Discovery in corso…';
+      document.getElementById('snmp_prog_detail').textContent = '';
+      _snmpPollTimer = setInterval(pollSnmpStatus, 2000);
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Avvia Discovery';
+      showStatus('snmp_status', 'Errore: ' + e, 'err');
+    });
+}
+
+function pollSnmpStatus() {
+  fetch('/ipam/api/snmp/discover/status')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var detail = [];
+      if (d.started_at)   detail.push('Avvio: '     + d.started_at);
+      if (d.current_host) detail.push('Host: '      + d.current_host);
+      if (d.arp_entries !== undefined) detail.push('ARP entries: ' + d.arp_entries);
+      if (d.mac_entries !== undefined) detail.push('MAC trovati: ' + d.mac_entries);
+      if (d.updated     !== undefined) detail.push('IP aggiornati: ' + d.updated);
+      if (d.current_step) detail.push('Step: ' + d.current_step);
+      if (d.error)        detail.push('Errore: '    + d.error);
+      document.getElementById('snmp_prog_detail').textContent = detail.join('\n');
+
+      if (!d.running) {
+        clearInterval(_snmpPollTimer);
+        var btn = document.getElementById('snmpDiscoverBtn');
+        btn.disabled = false; btn.textContent = 'Avvia Discovery';
+        if (d.error) {
+          document.getElementById('snmp_prog_icon').textContent  = '❌';
+          document.getElementById('snmp_prog_title').textContent = 'Discovery fallita';
+          showStatus('snmp_status', 'Errore: ' + d.error, 'err');
+        } else {
+          document.getElementById('snmp_prog_icon').textContent  = '✅';
+          document.getElementById('snmp_prog_title').textContent =
+            'Discovery completata — ' + (d.ips_updated || 0) + ' IP aggiornati';
+          showStatus('snmp_status', 'Completata', 'ok');
+        }
+      }
+    });
+}
+
+// ── Log Accessi ───────────────────────────────────────────────────
+var _logColors = {
+  'LOGIN_OK':   '#3fb950',
+  'LDAP_OK':    '#3fb950',
+  'LOGOUT':     '#58a6ff',
+  'LOGIN_FAIL': '#f85149',
+  'LDAP_ERR':   '#f85149',
+  'LDAP_404':   '#f0883e',
+  'LDAP_BADPW': '#f85149',
+  'LDAP_GROUP': '#f0883e',
+  'DISABLED':   '#f85149',
+  'LOCAL_FALL': '#e3b341',
+};
+
+function loadAuthLog() {
+  var n = document.getElementById('log_lines').value;
+  var wrap = document.getElementById('auth_log_wrap');
+  wrap.innerHTML = '<span style="color:var(--text-muted)">Caricamento…</span>';
+  fetch('/ipam/api/settings/auth-log?lines=' + n)
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.exists) {
+        wrap.innerHTML = '<span style="color:var(--text-muted)">Nessun log disponibile (il file verrà creato al primo accesso)</span>';
+        return;
+      }
+      if (!d.lines || !d.lines.length) {
+        wrap.innerHTML = '<span style="color:var(--text-muted)">Log vuoto</span>';
+        return;
+      }
+      wrap.innerHTML = d.lines.map(function(line) {
+        var color = 'var(--text-muted)';
+        var parts = line.split(' | ');
+        if (parts.length >= 2) {
+          var evt = parts[1].trim().split(' ')[0];
+          color = _logColors[evt] || 'var(--text-primary)';
+        }
+        return '<div style="color:' + color + ';white-space:pre">' + esc(line) + '</div>';
+      }).join('');
+      var meta = document.getElementById('auth_log_meta');
+      meta.textContent = 'Visualizzate ' + d.lines.length + ' righe su ' + d.total + ' totali \u2014 dal file instance/auth.log';
+    })
+    .catch(function() {
+      wrap.innerHTML = '<span style="color:#f85149">Errore lettura log</span>';
+    });
+}
+
+// ── Ambiente Python ───────────────────────────────────────────────
+function loadVenvInfo(btn) {
+  var loading = document.getElementById('venv_loading');
+  var summary = document.getElementById('venv_summary');
+  var tableWrap = document.getElementById('venv_table_wrap');
+  var reqBody = document.getElementById('venv_req_body');
+  var allBody = document.getElementById('venv_all_body');
+  var pkgCount = document.getElementById('venv_pkg_count');
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Caricamento…'; }
+  loading.style.display = 'block';
+  loading.textContent = 'Caricamento informazioni ambiente Python…';
+  summary.style.display = 'none';
+  tableWrap.style.display = 'none';
+
+  fetch('/ipam/api/venv-info')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      // Sommario versione Python
+      summary.style.display = 'block';
+      var ok = d.ok;
+      var missingCount = d.missing ? d.missing.length : 0;
+      var bgColor = ok ? 'rgba(63,185,80,.12)' : 'rgba(248,81,73,.12)';
+      var borderColor = ok ? '#3fb950' : '#f85149';
+      summary.style.background = bgColor;
+      summary.style.borderLeft = '3px solid ' + borderColor;
+      summary.style.borderRadius = '6px';
+      summary.innerHTML =
+        '<strong>Python:</strong> ' + esc(d.python_version) + '<br>' +
+        '<strong>Eseguibile:</strong> <code style="font-size:.79rem">' + esc(d.python_executable) + '</code><br>' +
+        (ok
+          ? '<span style="color:#3fb950">&#10003; Tutti i pacchetti di requirements.txt sono installati</span>'
+          : '<span style="color:#f85149">&#9888; ' + missingCount + ' pacchett' + (missingCount === 1 ? 'o mancante' : 'i mancanti') + ' rispetto a requirements.txt</span>');
+
+      // Tabella requirements
+      reqBody.innerHTML = '';
+      if (d.requirements && d.requirements.length) {
+        var missingSet = {};
+        (d.missing || []).forEach(function(p) { missingSet[p.name.toLowerCase()] = true; });
+        d.requirements.forEach(function(p) {
+          var isMissing = missingSet[p.name.toLowerCase()];
+          var installed = p.installed || '—';
+          var statusHtml = isMissing
+            ? '<span style="color:#f85149;font-weight:600">Mancante</span>'
+            : '<span style="color:#3fb950">&#10003; OK</span>';
+          var tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td style="font-family:monospace;font-size:.83rem">' + esc(p.name) + '</td>' +
+            '<td style="font-family:monospace;font-size:.83rem;color:var(--text-muted)">' + esc(p.spec) + '</td>' +
+            '<td style="font-family:monospace;font-size:.83rem">' + esc(installed) + '</td>' +
+            '<td style="text-align:center">' + statusHtml + '</td>';
+          reqBody.appendChild(tr);
+        });
+      } else {
+        reqBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:1rem">requirements.txt non trovato</td></tr>';
+      }
+
+      // Lista completa pacchetti
+      allBody.innerHTML = '';
+      pkgCount.textContent = d.packages ? d.packages.length : 0;
+      (d.packages || []).forEach(function(p) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td style="font-family:monospace;font-size:.82rem">' + esc(p.name) + '</td>' +
+          '<td style="font-family:monospace;font-size:.82rem;color:var(--text-muted)">' + esc(p.version) + '</td>';
+        allBody.appendChild(tr);
+      });
+
+      loading.style.display = 'none';
+      tableWrap.style.display = 'block';
+    })
+    .catch(function(err) {
+      loading.style.display = 'block';
+      loading.style.color = '#f85149';
+      loading.textContent = 'Errore nel caricamento delle informazioni: ' + err;
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:.3rem"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Aggiorna'; }
+    });
+}
+
+// ── Init pagina ───────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  loadUsers();
+  loadLdap();
+  loadAuthLog();
+});
+</script>
+{% endblock %}

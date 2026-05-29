@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+{% block title %}Reti{% endblock %}
+
+{% block page_title %}
+<div class="page-title">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+  Reti &amp; Subnet
+</div>
+{% endblock %}
+
+{% block header_actions %}
+<button class="btn btn-primary btn-sm" onclick="openModal('modalAddNetwork')">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  Aggiungi Rete
+</button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filters -->
+<form method="GET" action="{{ url_for('networks') }}">
+  <div class="filters-bar">
+    <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input name="q" class="search-input" value="{{ search }}" placeholder="Cerca rete, IP, hostname, descrizione…">
+    </div>
+
+    <span class="filter-label">Location</span>
+    <select name="location" class="filter-select" onchange="this.form.submit()">
+      <option value="">Tutte</option>
+      {% for loc in locations %}
+      <option value="{{ loc }}" {% if location == loc %}selected{% endif %}>{{ loc }}</option>
+      {% endfor %}
+    </select>
+
+    <span class="filter-label">Tipo</span>
+    <select name="type" class="filter-select" onchange="this.form.submit()">
+      <option value="">Tutti</option>
+      <option value="subnet"   {% if net_type=='subnet' %}selected{% endif %}>Subnet</option>
+      <option value="supernet" {% if net_type=='supernet' %}selected{% endif %}>Supernet</option>
+    </select>
+
+    <button type="submit" class="btn btn-secondary btn-sm">Cerca</button>
+    {% if search or location or net_type %}
+    <a href="{{ url_for('networks') }}" class="btn btn-secondary btn-sm">✕ Reset</a>
+    {% endif %}
+
+    <div class="result-count">{{ pagination.total }} risultati</div>
+  </div>
+</form>
+
+<!-- Table -->
+<div class="card" style="margin-top:0;border-radius:0 0 var(--radius-lg) var(--radius-lg)">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Nome Rete</th>
+          <th>Indirizzo</th>
+          <th>CIDR</th>
+          <th>Subnet Mask</th>
+          <th>VLAN</th>
+          <th>Location</th>
+          <th>Utilizzo IP</th>
+          <th>IP Totali</th>
+          <th>IP Usati</th>
+          <th>IP Liberi</th>
+          <th>Stato</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for net in networks %}
+        <tr>
+          <td>
+            <a href="{{ url_for('network_detail', net_id=net.id) }}" style="color:var(--text-primary);font-weight:500">
+              {% if net.network_type == 'supernet' %}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" style="margin-right:4px;vertical-align:middle"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+              {% else %}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" style="margin-right:4px;vertical-align:middle"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+              {% endif %}
+              {{ net.name }}
+            </a>
+          </td>
+          <td class="col-mono">{{ net.address }}</td>
+          <td class="col-mono">/{{ net.cidr }}</td>
+          <td class="col-mono" style="color:var(--text-muted)">{{ net.netmask }}</td>
+          <td>
+            {% if net.vlan_id %}
+            <span class="vlan-tag">{{ net.vlan_id }}</span>
+            {% else %}<span style="color:var(--text-muted)">—</span>{% endif %}
+          </td>
+          <td style="color:var(--text-secondary);font-size:12px">{{ net.location or '—' }}</td>
+          <td>
+            <div class="usage-bar-wrap">
+              <div class="usage-bar">
+                {% set up = net.usage_percent %}
+                <div class="usage-fill {% if up < 50 %}usage-low{% elif up < 75 %}usage-med{% elif up < 90 %}usage-high{% else %}usage-crit{% endif %}"
+                     style="width:{{ up }}%"></div>
+              </div>
+              <div class="usage-pct">{{ up }}%</div>
+            </div>
+          </td>
+          <td class="col-mono" style="text-align:right">{{ "{:,}".format(net.total_hosts) }}</td>
+          <td class="col-mono" style="text-align:right;color:var(--accent)">{{ "{:,}".format(net.used_count) }}</td>
+          <td class="col-mono" style="text-align:right;color:var(--green)">{{ "{:,}".format(net.available_count) }}</td>
+          <td><span class="badge badge-{{ net.status }}">{{ net.status }}</span></td>
+          <td>
+            <div style="display:flex;gap:.25rem">
+              <a href="{{ url_for('network_detail', net_id=net.id) }}" class="btn btn-secondary btn-sm btn-icon" title="Dettaglio">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </a>
+              <button class="btn btn-danger btn-sm btn-icon" title="Elimina" onclick="deleteNetwork({{ net.id }}, '{{ net.name }}')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% if search and hostname_matches.get(net.id) %}
+        <tr style="background:var(--accent-glow)">
+          <td colspan="12" style="padding:.4rem 1rem .4rem 2.5rem">
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span style="font-size:11px;color:var(--accent);font-weight:600">Hostname trovati:</span>
+              {% for match in hostname_matches[net.id][:5] %}
+              <a href="{{ url_for('network_detail', net_id=net.id) }}?view=all"
+                 style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-secondary);background:var(--bg-elevated);padding:1px 6px;border-radius:3px;white-space:nowrap">
+                {{ match.ip }} — {{ match.hostname }}
+              </a>
+              {% endfor %}
+              {% if hostname_matches[net.id]|length > 5 %}
+              <span style="font-size:11px;color:var(--text-muted)">+{{ hostname_matches[net.id]|length - 5 }} altri</span>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+        {% else %}
+        <tr>
+          <td colspan="12">
+            <div class="empty-state">
+              <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M12 11l-5 6M12 11l5 6"/></svg>
+              <div class="empty-title">Nessuna rete trovata</div>
+              <div class="empty-sub">Prova a cambiare i filtri di ricerca</div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if pagination.pages > 1 %}
+  <div class="pagination">
+    <div class="page-info">
+      {{ (pagination.page-1)*pagination.per_page + 1 }}–{{ [(pagination.page)*pagination.per_page, pagination.total]|min }} di {{ pagination.total }}
+    </div>
+    <div class="page-links">
+      <a href="?page={{ pagination.prev_num }}&q={{ search }}&location={{ location }}&type={{ net_type }}"
+         class="page-link {% if not pagination.has_prev %}disabled{% endif %}">‹</a>
+      {% for p in pagination.iter_pages(left_edge=1,right_edge=1,left_current=2,right_current=2) %}
+        {% if p %}
+        <a href="?page={{ p }}&q={{ search }}&location={{ location }}&type={{ net_type }}"
+           class="page-link {% if p == pagination.page %}active{% endif %}">{{ p }}</a>
+        {% else %}
+        <span class="page-link" style="pointer-events:none">…</span>
+        {% endif %}
+      {% endfor %}
+      <a href="?page={{ pagination.next_num }}&q={{ search }}&location={{ location }}&type={{ net_type }}"
+         class="page-link {% if not pagination.has_next %}disabled{% endif %}">›</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ── Modal: Add Network ── -->
+<div class="modal-overlay" id="modalAddNetwork">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Aggiungi Rete</div>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalAddNetwork">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Indirizzo *</label>
+          <input id="netAddress" class="form-control" placeholder="192.168.1.0" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">CIDR *</label>
+          <input id="netCidr" class="form-control" type="number" min="1" max="32" placeholder="24">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nome *</label>
+        <input id="netName" class="form-control" placeholder="Rete Uffici Roma">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Location</label>
+          <input id="netLocation" class="form-control" placeholder="Sede di Roma">
+        </div>
+        <div class="form-group">
+          <label class="form-label">VLAN ID</label>
+          <input id="netVlan" class="form-control" type="number" placeholder="100">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Tipo</label>
+          <select id="netType" class="form-control filter-select" style="width:100%">
+            <option value="subnet">Subnet</option>
+            <option value="supernet">Supernet</option>
+            <option value="vlan">VLAN Network</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stato</label>
+          <select id="netStatus" class="form-control filter-select" style="width:100%">
+            <option value="active">active</option>
+            <option value="reserved">reserved</option>
+            <option value="deprecated">deprecated</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Country</label>
+          <input id="netCountry" class="form-control" placeholder="es. Italy">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Site</label>
+          <input id="netSite" class="form-control" placeholder="es. Milano DC1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Usage</label>
+          <input id="netUsage" class="form-control" placeholder="es. Production">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Zone</label>
+          <input id="netZone" class="form-control" placeholder="es. DMZ">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Gateway</label>
+          <input id="netGateway" class="form-control" placeholder="es. 192.168.1.1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Descrizione</label>
+          <input id="netDesc" class="form-control" placeholder="Opzionale">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalAddNetwork">Annulla</button>
+      <button class="btn btn-primary" onclick="submitAddNetwork()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal Elimina Forzata ────────────────────────────────────── -->
+<div class="modal-overlay" id="modalForceDelete">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-header" style="background:#dc3545;color:#fff">
+      <h3 class="modal-title" style="font-size:1rem">
+        ⚠️ ATTENZIONE: ELIMINAZIONE SUBNET
+      </h3>
+      <button class="btn btn-secondary btn-sm btn-icon" data-close-modal="modalForceDelete"
+              style="background:rgba(255,255,255,.2);color:#fff;border:none">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-weight:600;color:#dc3545;margin-bottom:.5rem">
+        STAI PER CANCELLARE UN'INTERA SUBNET!
+      </p>
+      <p id="forceDeleteMsg" style="margin-bottom:1rem;font-size:.92rem"></p>
+      <p style="margin-bottom:.4rem;font-size:.9rem">
+        Per confermare scrivi la parola <strong>ELIMINA</strong> nella casella sottostante:
+      </p>
+      <input id="forceDeleteConfirmInput" class="form-control" type="text"
+             placeholder="ELIMINA" autocomplete="off"
+             oninput="document.getElementById('btnForceDeleteConfirm').disabled = this.value !== 'ELIMINA'">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="modalForceDelete">Annulla</button>
+      <button id="btnForceDeleteConfirm" class="btn btn-danger" disabled
+              onclick="submitForceDelete()">Elimina tutto</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function submitAddNetwork() {
+  const payload = {
+    address:      document.getElementById('netAddress').value.trim(),
+    cidr:         parseInt(document.getElementById('netCidr').value),
+    name:         document.getElementById('netName').value.trim(),
+    location:     document.getElementById('netLocation').value.trim(),
+    vlan_id:      parseInt(document.getElementById('netVlan').value) || null,
+    network_type: document.getElementById('netType').value,
+    status:       document.getElementById('netStatus').value,
+    country:      document.getElementById('netCountry').value.trim(),
+    site:         document.getElementById('netSite').value.trim(),
+    usage:        document.getElementById('netUsage').value.trim(),
+    zone:         document.getElementById('netZone').value.trim(),
+    gateway:      document.getElementById('netGateway').value.trim(),
+    description:  document.getElementById('netDesc').value.trim(),
+  };
+  if (!payload.address || !payload.cidr || !payload.name) {
+    showToast('Compila i campi obbligatori', 'error'); return;
+  }
+  var res = await apiFetch('/ipam/api/networks', { method: 'POST', body: JSON.stringify(payload) });
+  var msg = 'Rete aggiunta';
+  if (res.auto_ips_created > 0) {
+    msg += ' — ' + res.auto_ips_created + ' IP creati con stato "disponibile"';
+  } else if (res.auto_ips_skipped) {
+    msg += ' — rete troppo grande, IP non generati automaticamente';
+  }
+  showToast(msg, 'success');
+  closeModal('modalAddNetwork');
+  setTimeout(function(){ window.location.reload(); }, 800);
+}
+
+var _forceDeleteNetId = null;
+
+function deleteNetwork(id, name) {
+  _forceDeleteNetId = id;
+  document.getElementById('forceDeleteMsg').innerHTML =
+    'La rete <strong>"' + name + '"</strong> e tutti i suoi indirizzi IP verranno' +
+    ' <strong>eliminati definitivamente</strong> e l\'operazione non sarà reversibile.';
+  document.getElementById('forceDeleteConfirmInput').value = '';
+  document.getElementById('btnForceDeleteConfirm').disabled = true;
+  openModal('modalForceDelete');
+}
+
+async function submitForceDelete() {
+  if (!_forceDeleteNetId) return;
+  try {
+    var res = await apiFetch('/ipam/api/networks/' + _forceDeleteNetId + '?force=1', { method: 'DELETE' });
+    closeModal('modalForceDelete');
+    showToast('Rete eliminata (' + (res.ip_deleted || 0) + ' IP rimossi)', 'success');
+    setTimeout(function(){ window.location.reload(); }, 1000);
+  } catch(e) { /* errore già mostrato dal toast */ }
+}
+</script>
+{% endblock %}
