@@ -1,0 +1,27 @@
+# Database — non includere mai nel repository
+instance/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+
+# Replit
+.local/
+.cache/
+.pythonlibs/
+.upm/
+.replit
+replit.nix
+.agents/
+
+# Zip di distribuzione
+*.zip
+
+# Log e lock runtime
+*.lock
+attached_assets/
