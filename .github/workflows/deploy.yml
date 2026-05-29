@@ -1,1 +1,148 @@
+name: Deploy IPAM
 
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: verifica sintattica + dipendenze
+  # ─────────────────────────────────────────────
+  test:
+    name: Verifica codice
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configura Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Installa dipendenze
+        run: pip install -r requirements.txt
+
+      - name: Verifica sintassi Python
+        run: |
+          python -m py_compile app.py
+          python -m py_compile scanner.py
+          python -m py_compile wsgi_gunicorn.py
+          python -m py_compile main.py
+          echo "Sintassi OK per tutti i file Python principali."
+
+      - name: Esegui test automatici (pytest)
+        env:
+          IPAM_DATABASE_URI: "sqlite:///:memory:"
+          IPAM_SEED: "0"
+        run: |
+          pytest test_app.py -v --tb=short
+
+  # ─────────────────────────────────────────────
+  # JOB 2: genera artefatto zip
+  # ─────────────────────────────────────────────
+  build:
+    name: Genera zip di deploy
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Estrai versione dal codice
+        id: versione
+        run: |
+          VERSION=$(grep -oP "(?<=APP_VERSION\s=\s['\"])[^'\"]*" app.py | head -1 || echo "")
+          if [ -z "$VERSION" ]; then
+            VERSION=$(grep -oP "(?<=['\"]version['\"]:\s*['\"])[^'\"]*" app.py | head -1 || echo "")
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION="snapshot"
+          fi
+          DATE=$(date +%Y%m%d)
+          NOME="ipam_v${VERSION}_${DATE}"
+          echo "nome=${NOME}" >> "$GITHUB_OUTPUT"
+          echo "Versione rilevata: ${VERSION} → artefatto: ${NOME}.zip"
+
+      - name: Crea zip (escludi DB e file non necessari)
+        run: |
+          NOME="${{ steps.versione.outputs.nome }}"
+          zip -r "${NOME}.zip" . \
+            --exclude "instance/ipam.db" \
+            --exclude "instance/*.db-wal" \
+            --exclude "instance/*.db-shm" \
+            --exclude ".git/*" \
+            --exclude ".github/*" \
+            --exclude "__pycache__/*" \
+            --exclude "*.pyc" \
+            --exclude "*.pyo" \
+            --exclude "venv/*" \
+            --exclude ".local/*" \
+            --exclude ".agents/*" \
+            --exclude "*.log"
+          echo "ZIP creato: ${NOME}.zip ($(du -sh ${NOME}.zip | cut -f1))"
+
+      - name: Carica artefatto su GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.versione.outputs.nome }}
+          path: ${{ steps.versione.outputs.nome }}.zip
+          retention-days: 30
+
+  # ─────────────────────────────────────────────
+  # JOB 3: deploy via SSH (solo se secrets configurati)
+  # ─────────────────────────────────────────────
+  deploy:
+    name: Deploy su server di produzione
+    runs-on: ubuntu-latest
+    needs: build
+    # Il deploy avviene solo se SSH_HOST è configurato nei secrets del repository
+    if: ${{ vars.SSH_DEPLOY_ENABLED == 'true' }}
+
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configura chiave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copia file sul server via rsync
+        run: |
+          rsync -az --delete \
+            --exclude "instance/ipam.db" \
+            --exclude "instance/*.db-wal" \
+            --exclude "instance/*.db-shm" \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude "__pycache__/" \
+            --exclude "*.pyc" \
+            --exclude "venv/" \
+            --exclude ".local/" \
+            --exclude ".agents/" \
+            --exclude "*.log" \
+            ./ \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.SSH_PATH || '/var/www/html/ipam' }}/staging/"
+
+      - name: Esegui update.sh sul server
+        run: |
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "sudo bash ${{ secrets.SSH_PATH || '/var/www/html/ipam' }}/staging/update.sh \
+              ${{ secrets.SSH_PATH || '/var/www/html/ipam' }}"
+
+      - name: Verifica deploy
+        run: |
+          sleep 3
+          STATUS=$(ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "curl -s --max-time 10 http://127.0.0.1:8000/ipam/api/version 2>/dev/null || echo '{}'")
+          echo "Risposta server: ${STATUS}"
