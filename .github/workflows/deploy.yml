@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ─────────────────────────────────────────────
   # JOB 1: verifica sintattica + dipendenze
@@ -16,11 +19,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Configura Node.js 24 (richiesto dalle GitHub Actions)
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
 
       - name: Configura Python
         uses: actions/setup-python@v5
@@ -57,11 +55,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Configura Node.js 24 (richiesto dalle GitHub Actions)
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
 
       - name: Estrai versione dal codice
         id: versione
@@ -110,7 +103,6 @@ jobs:
     name: Deploy su server di produzione
     runs-on: ubuntu-latest
     needs: build
-    # Il deploy avviene solo se SSH_HOST è configurato nei secrets del repository
     if: ${{ vars.SSH_DEPLOY_ENABLED == 'true' }}
 
     environment:
@@ -119,11 +111,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Configura Node.js 24 (richiesto dalle GitHub Actions)
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
 
       - name: Configura chiave SSH
         run: |
