@@ -12,6 +12,18 @@
 
 ---
 
+## Download
+
+[![Ultima release](https://img.shields.io/github/v/release/rantonet/ipam?label=ultima%20versione&color=blue)](https://github.com/rantonet/ipam/releases/latest)
+
+| Versione | Data | Download |
+|---|---|---|
+| **v1.9.0** | 2026-05-29 | [ipam_v1.9.0_20260529.zip](https://github.com/rantonet/ipam/releases/download/v1.9.0/ipam_v1.9.0_20260529.zip) |
+
+Tutte le versioni sono disponibili nella pagina [**Releases**](https://github.com/rantonet/ipam/releases).
+
+---
+
 ## Indice
 
 - [Screenshot](#screenshot)
@@ -116,7 +128,8 @@ Le dipendenze Python vengono installate automaticamente dallo script di installa
 
 ```bash
 # 1. Scarica e decomprimi il pacchetto
-unzip ipam_v1.9.0_20260528.zip -d /tmp/ipam_install
+wget https://github.com/rantonet/ipam/releases/download/v1.9.0/ipam_v1.9.0_20260529.zip
+unzip ipam_v1.9.0_20260529.zip -d /tmp/ipam_install
 cd /tmp/ipam_install
 
 # 2. Esegui lo script di installazione (richiede sudo)
@@ -389,5 +402,5 @@ curl http://localhost:8000/ipam/api/venv-info
 ---
 
 ## Licenza
-Questo progetto è distribuito sotto la licenza GNU General Public License v3.0. 
-Vedi il file [LICENSE](LICENSE) per maggiori dettagli.
+
+Uso interno — tutti i diritti riservati.
