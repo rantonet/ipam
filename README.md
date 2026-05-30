@@ -620,4 +620,5 @@ curl http://localhost:8000/ipam/api/venv-info
 
 ## Licenza
 
-Uso interno — tutti i diritti riservati.
+Questo progetto è distribuito sotto la licenza GNU General Public License v3.0.
+Vedi il file [LICENSE](LICENSE) per maggiori dettagli.
