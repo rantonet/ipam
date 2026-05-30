@@ -299,30 +299,247 @@ Gestione dei **Gruppi di Scansione** dalle Impostazioni:
 
 ### API REST
 
-Tutti gli endpoint restituiscono JSON. Prefisso `/ipam/api/`.
+Tutti gli endpoint restituiscono JSON. Prefisso base: `http://server/ipam/api/`.
+
+**Autenticazione:** basata su cookie di sessione. Occorre prima effettuare il login e conservare il cookie per le chiamate successive.
 
 | Metodo | Endpoint | Descrizione |
 |---|---|---|
-| GET | `/api/networks` | Lista reti (con filtri) |
+| POST | `/login` | Autenticazione (restituisce cookie di sessione) |
+| GET | `/api/version` | Versione applicazione |
+| GET | `/api/stats` | Statistiche globali |
+| GET | `/api/networks` | Lista reti (con filtri `?type=`, `?q=`) |
 | POST | `/api/networks` | Crea nuova rete |
-| GET | `/api/networks/<id>` | Dettaglio rete |
 | PUT | `/api/networks/<id>` | Aggiorna rete |
 | DELETE | `/api/networks/<id>` | Elimina rete |
-| POST | `/api/networks/<id>/scan` | Avvia scansione subnet |
 | GET | `/api/networks/tree` | Albero gerarchico reti |
-| GET | `/api/ip-records` | Lista IP (con filtri) |
+| POST | `/api/networks/<id>/scan` | Avvia scansione subnet |
+| GET | `/api/ip-records` | Lista IP (filtri: `?network_id=`, `?q=`, `?status=`, `?limit=`, `?offset=`) |
 | POST | `/api/ip-records` | Crea record IP |
 | PUT | `/api/ip-records/<id>` | Aggiorna record IP |
 | DELETE | `/api/ip-records/<id>` | Elimina record IP |
+| PUT | `/api/ip-records/<id>/clear` | Libera un IP (reset hostname/MAC/stato) |
 | GET | `/api/vlans` | Lista VLAN |
 | POST | `/api/vlans` | Crea VLAN |
 | PUT | `/api/vlans/<id>` | Aggiorna VLAN |
 | DELETE | `/api/vlans/<id>` | Elimina VLAN |
-| GET | `/api/scan-logs` | Log scansioni |
-| GET | `/api/stats` | Statistiche globali |
-| GET | `/api/version` | Versione applicazione |
-| POST | `/api/snmp/discover` | Avvia discovery SNMP |
-| POST | `/api/bulk-update` | Aggiornamento bulk |
+| GET | `/api/logs` | Log scansioni |
+| PUT | `/api/bulk-edit/networks` | Modifica bulk reti |
+| PUT | `/api/bulk-edit/ip-records` | Modifica bulk IP |
+
+---
+
+### Esempi di utilizzo API
+
+#### Autenticazione
+
+L'API usa sessioni basate su cookie. Ogni client deve prima autenticarsi e poi includere il cookie in tutte le richieste successive.
+
+**curl:**
+```bash
+# Login — salva il cookie in un file
+curl -s -c cookies.txt -X POST http://server/ipam/login \
+  -d "username=admin&password=admin"
+
+# Verifica versione (con cookie)
+curl -s -b cookies.txt http://server/ipam/api/version
+```
+
+**Python (requests):**
+```python
+import requests
+
+BASE = "http://server/ipam"
+session = requests.Session()
+
+# Login — il cookie viene gestito automaticamente dalla session
+session.post(f"{BASE}/login", data={"username": "admin", "password": "admin"})
+
+# Da qui in poi la session include automaticamente il cookie
+resp = session.get(f"{BASE}/api/version")
+print(resp.json())
+# → {"version": "1.9.0", "build": "2026-05-28", ...}
+```
+
+---
+
+#### Lettura reti e subnet
+
+**curl:**
+```bash
+# Tutte le reti
+curl -s -b cookies.txt http://server/ipam/api/networks | python3 -m json.tool
+
+# Solo le subnet (filtro per tipo)
+curl -s -b cookies.txt "http://server/ipam/api/networks?type=subnet"
+
+# Ricerca per nome o indirizzo
+curl -s -b cookies.txt "http://server/ipam/api/networks?q=10.86"
+```
+
+**Python:**
+```python
+# Lista tutte le reti
+reti = session.get(f"{BASE}/api/networks").json()
+for r in reti:
+    print(f"{r['address']}/{r['cidr']}  {r['name']}  ({r['network_type']})")
+
+# Cerca solo le subnet del sito "Milano"
+subnet_mi = session.get(f"{BASE}/api/networks", params={"type": "subnet", "q": "Milano"}).json()
+```
+
+---
+
+#### Creazione di una rete
+
+**curl:**
+```bash
+curl -s -b cookies.txt -X POST http://server/ipam/api/networks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Server Farm DMZ",
+    "address": "10.50.10.0",
+    "cidr": 24,
+    "network_type": "subnet",
+    "location": "Data Center Nord",
+    "description": "Subnet server DMZ",
+    "vlan_id": 3
+  }'
+```
+
+**Python:**
+```python
+nuova_rete = session.post(f"{BASE}/api/networks", json={
+    "name":         "Server Farm DMZ",
+    "address":      "10.50.10.0",
+    "cidr":         24,
+    "network_type": "subnet",
+    "location":     "Data Center Nord",
+    "description":  "Subnet server DMZ",
+    "vlan_id":      3
+})
+print(nuova_rete.status_code)   # 201 = creata
+print(nuova_rete.json())        # → {"id": 25, "address": "10.50.10.0", ...}
+```
+
+> La rete viene normalizzata automaticamente (es. `10.50.10.5/24` → `10.50.10.0/24`).
+> Il `parent_id` viene calcolato automaticamente se non specificato.
+
+---
+
+#### Lettura indirizzi IP
+
+**curl:**
+```bash
+# Tutti gli IP di una subnet (network_id=5)
+curl -s -b cookies.txt "http://server/ipam/api/ip-records?network_id=5"
+
+# IP in uso, con paginazione
+curl -s -b cookies.txt "http://server/ipam/api/ip-records?status=used&limit=100&offset=0"
+
+# Ricerca per hostname o MAC
+curl -s -b cookies.txt "http://server/ipam/api/ip-records?q=srv-web"
+```
+
+**Python:**
+```python
+# Tutti gli IP di una subnet con paginazione automatica
+def get_all_ips(network_id):
+    tutti = []
+    offset = 0
+    while True:
+        r = session.get(f"{BASE}/api/ip-records", params={
+            "network_id": network_id, "limit": 500, "offset": offset
+        }).json()
+        tutti.extend(r["items"])
+        if len(tutti) >= r["total"]:
+            break
+        offset += 500
+    return tutti
+
+ip_list = get_all_ips(network_id=5)
+print(f"Trovati {len(ip_list)} indirizzi")
+for ip in ip_list:
+    print(f"{ip['ip_address']}  {ip['hostname'] or '—'}  {ip['status']}")
+```
+
+---
+
+#### Registrazione e aggiornamento di un IP
+
+**curl:**
+```bash
+# Registra un nuovo IP
+curl -s -b cookies.txt -X POST http://server/ipam/api/ip-records \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ip_address": "10.50.10.15",
+    "hostname":   "srv-web-01",
+    "mac_address":"AA:BB:CC:DD:EE:FF",
+    "device_type":"Server",
+    "os_type":    "Linux",
+    "status":     "used",
+    "network_id": 5,
+    "description":"Web server principale"
+  }'
+
+# Aggiorna hostname di un IP esistente (id=42)
+curl -s -b cookies.txt -X PUT http://server/ipam/api/ip-records/42 \
+  -H "Content-Type: application/json" \
+  -d '{"hostname": "srv-web-01-new", "status": "used"}'
+
+# Libera un IP (lo segna come disponibile e cancella i dati)
+curl -s -b cookies.txt -X PUT http://server/ipam/api/ip-records/42/clear
+```
+
+**Python:**
+```python
+# Registra un IP
+resp = session.post(f"{BASE}/api/ip-records", json={
+    "ip_address":  "10.50.10.15",
+    "hostname":    "srv-web-01",
+    "mac_address": "AA:BB:CC:DD:EE:FF",
+    "device_type": "Server",
+    "os_type":     "Linux",
+    "status":      "used",
+    "network_id":  5
+})
+ip = resp.json()
+print(f"IP creato con id={ip['id']}")
+
+# Aggiorna
+session.put(f"{BASE}/api/ip-records/{ip['id']}", json={"hostname": "srv-web-01-new"})
+
+# Libera l'IP
+session.put(f"{BASE}/api/ip-records/{ip['id']}/clear")
+```
+
+---
+
+#### Statistiche globali
+
+**Python:**
+```python
+stats = session.get(f"{BASE}/api/stats").json()
+print(f"Reti totali : {stats['total_networks']}")
+print(f"IP totali   : {stats['total_ips']}")
+print(f"IP in uso   : {stats['used_ips']}")
+print(f"IP liberi   : {stats['free_ips']}")
+print(f"Utilizzo    : {stats['usage_percent']:.1f}%")
+```
+
+---
+
+#### Codici di risposta HTTP
+
+| Codice | Significato |
+|---|---|
+| `200` | OK — operazione riuscita |
+| `201` | Created — risorsa creata |
+| `400` | Bad Request — parametri non validi |
+| `401` | Unauthorized — non autenticato (cookie mancante/scaduto) |
+| `404` | Not Found — risorsa non trovata |
+| `409` | Conflict — risorsa già esistente (es. IP duplicato) |
 
 ---
 
