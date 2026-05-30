@@ -17,6 +17,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Configura Node.js 24 (richiesto dalle GitHub Actions)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
       - name: Configura Python
         uses: actions/setup-python@v5
         with:
@@ -52,6 +57,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Configura Node.js 24 (richiesto dalle GitHub Actions)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
       - name: Estrai versione dal codice
         id: versione
@@ -109,6 +119,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Configura Node.js 24 (richiesto dalle GitHub Actions)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
       - name: Configura chiave SSH
         run: |
