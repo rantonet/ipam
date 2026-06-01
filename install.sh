@@ -40,11 +40,21 @@ detect_distro() {
         APACHE_SVC="httpd"
         APACHE_USER="apache"
         CONF_DEST="/etc/httpd/conf.d/ipam.conf"
-        RHEL_VER=$(rpm -E '%{rhel}' 2>/dev/null || echo "0")
-        if [[ "$RHEL_VER" -ge 8 ]]; then
+        if grep -qi "fedora" /etc/redhat-release; then
+            # Fedora: %{rhel} non è definita, usa sempre dnf, niente EPEL
+            IS_FEDORA=true
             PKG_MGR="dnf"
+            RHEL_VER=99
         else
-            PKG_MGR="yum"
+            IS_FEDORA=false
+            RHEL_VER=$(rpm -E '%{rhel}' 2>/dev/null || echo "0")
+            # Protezione: se la macro non è espansa (ritorna stringa) usa 0
+            [[ "$RHEL_VER" =~ ^[0-9]+$ ]] || RHEL_VER=0
+            if [[ "$RHEL_VER" -ge 8 ]]; then
+                PKG_MGR="dnf"
+            else
+                PKG_MGR="yum"
+            fi
         fi
     else
         echo "[ERRORE] Distribuzione non supportata." >&2
@@ -78,15 +88,20 @@ if [[ "$FAMILY" == "debian" ]]; then
     apt-get install -y apache2 python3 python3-pip python3-venv
 
 elif [[ "$FAMILY" == "redhat" ]]; then
-    if ! rpm -q epel-release &>/dev/null; then
-        $PKG_MGR install -y epel-release
-    fi
-    if [[ "$RHEL_VER" -ge 8 ]]; then
-        dnf config-manager --set-enabled powertools 2>/dev/null \
-            || dnf config-manager --set-enabled crb 2>/dev/null \
-            || true
-        $PKG_MGR install -y httpd python3 python3-pip python3-virtualenv
+    if [[ "${IS_FEDORA}" == "true" ]]; then
+        # Fedora: repo standard, niente EPEL, python3-virtualenv si chiama python3-virtualenv
+        $PKG_MGR install -y httpd python3 python3-pip python3-virtualenv 2>/dev/null \
+            || $PKG_MGR install -y httpd python3 python3-pip python3-devel
     else
+        # RHEL / CentOS / Rocky / AlmaLinux
+        if ! rpm -q epel-release &>/dev/null; then
+            $PKG_MGR install -y epel-release
+        fi
+        if [[ "$RHEL_VER" -ge 8 ]]; then
+            dnf config-manager --set-enabled powertools 2>/dev/null \
+                || dnf config-manager --set-enabled crb 2>/dev/null \
+                || true
+        fi
         $PKG_MGR install -y httpd python3 python3-pip python3-virtualenv
     fi
 fi
