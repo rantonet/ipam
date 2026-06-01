@@ -127,10 +127,10 @@ Le dipendenze Python vengono installate automaticamente dallo script di installa
 ### Installazione automatica
 
 ```bash
-# 1. Scarica e decomprimi il pacchetto
+# 1. Scarica e decomprimi il pacchetto (crea automaticamente la cartella deploy_ipam/)
 wget https://github.com/rantonet/ipam/releases/download/v1.9.0/ipam_v1.9.0_20260529.zip
-unzip ipam_v1.9.0_20260529.zip -d /tmp/ipam_install
-cd /tmp/ipam_install
+unzip ipam_v1.9.0_20260529.zip
+cd deploy_ipam
 
 # 2. Esegui lo script di installazione (richiede sudo)
 sudo bash install.sh
