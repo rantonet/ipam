@@ -220,21 +220,54 @@ chmod 750 "${INSTALL_DIR}/instance"
 chmod 640 "${INSTALL_DIR}/instance/ipam.db" 2>/dev/null || true
 
 if [[ "$FAMILY" == "redhat" ]]; then
-    if command -v semanage &>/dev/null && command -v restorecon &>/dev/null; then
-        semanage fcontext -a -t httpd_sys_content_t \
-            "${INSTALL_DIR}(/.*)?" 2>/dev/null \
-            || semanage fcontext -m -t httpd_sys_content_t \
-            "${INSTALL_DIR}(/.*)?"
-        semanage fcontext -a -t httpd_sys_rw_content_t \
-            "${INSTALL_DIR}/instance(/.*)?" 2>/dev/null \
-            || semanage fcontext -m -t httpd_sys_rw_content_t \
-            "${INSTALL_DIR}/instance(/.*)?"
-        restorecon -Rv "${INSTALL_DIR}" >/dev/null
-        echo "  SELinux: contesti applicati."
+    SELINUX_STATUS=$(getenforce 2>/dev/null || echo "Disabled")
+    if [[ "$SELINUX_STATUS" != "Disabled" ]]; then
+        echo "  SELinux attivo (${SELINUX_STATUS}) — configuro contesti e policy..."
+
+        if command -v semanage &>/dev/null && command -v restorecon &>/dev/null; then
+            # Contenuto app: lettura httpd
+            semanage fcontext -a -t httpd_sys_content_t \
+                "${INSTALL_DIR}(/.*)?" 2>/dev/null \
+                || semanage fcontext -m -t httpd_sys_content_t \
+                "${INSTALL_DIR}(/.*)?" 2>/dev/null || true
+            # Directory instance: scrittura httpd (DB SQLite)
+            semanage fcontext -a -t httpd_sys_rw_content_t \
+                "${INSTALL_DIR}/instance(/.*)?" 2>/dev/null \
+                || semanage fcontext -m -t httpd_sys_rw_content_t \
+                "${INSTALL_DIR}/instance(/.*)?" 2>/dev/null || true
+            # Binari venv (gunicorn, python3): devono essere eseguibili
+            semanage fcontext -a -t bin_t \
+                "${INSTALL_DIR}/venv/bin(/.*)?" 2>/dev/null \
+                || semanage fcontext -m -t bin_t \
+                "${INSTALL_DIR}/venv/bin(/.*)?" 2>/dev/null || true
+            restorecon -Rv "${INSTALL_DIR}" >/dev/null 2>&1
+            echo "  SELinux: contesti applicati (bin_t su venv/bin, rw su instance)."
+        else
+            # Fallback con chcon (non persistente ma funziona subito)
+            chcon -R -t bin_t "${INSTALL_DIR}/venv/bin/" 2>/dev/null || true
+            chcon -R -t httpd_sys_rw_content_t "${INSTALL_DIR}/instance/" 2>/dev/null || true
+            echo "  [WARN] semanage non trovato — usato chcon (non persistente)."
+            echo "         Installa policycoreutils-python-utils per la configurazione permanente."
+        fi
+
+        # Boolean: consente a httpd/gunicorn di connettersi alla rete e usare execmem
+        setsebool -P httpd_can_network_connect 1 2>/dev/null || true
+        setsebool -P httpd_execmem 1 2>/dev/null || true
+
+        # Genera policy personalizzata da eventuali denial nel log audit
+        if command -v ausearch &>/dev/null && command -v audit2allow &>/dev/null; then
+            DENIALS=$(ausearch -c 'gunicorn' --raw 2>/dev/null | wc -l)
+            if [[ "$DENIALS" -gt 0 ]]; then
+                ausearch -c 'gunicorn' --raw 2>/dev/null \
+                    | audit2allow -M my-gunicorn 2>/dev/null \
+                    && semodule -X 300 -i my-gunicorn.pp 2>/dev/null \
+                    && echo "  SELinux: policy my-gunicorn applicata da log audit." \
+                    || true
+            fi
+        fi
     else
-        echo "  [WARN] semanage non trovato. Installa policycoreutils-python-utils se SELinux e' attivo."
+        echo "  SELinux disabilitato — nessuna configurazione necessaria."
     fi
-    setsebool -P httpd_can_network_connect 1 2>/dev/null || true
 fi
 
 # ================================================================
