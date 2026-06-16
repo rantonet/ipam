@@ -9,10 +9,12 @@
 {% endblock %}
 
 {% block header_actions %}
+{% if current_user.is_admin %}
 <button class="btn btn-primary btn-sm" onclick="openModal('modalAddNetwork')">
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
   Aggiungi Rete
 </button>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -110,9 +112,11 @@
               <a href="{{ url_for('network_detail', net_id=net.id) }}" class="btn btn-secondary btn-sm btn-icon" title="Dettaglio">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               </a>
+              {% if current_user.is_admin %}
               <button class="btn btn-danger btn-sm btn-icon" title="Elimina" onclick="deleteNetwork({{ net.id }}, '{{ net.name }}')">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
               </button>
+              {% endif %}
             </div>
           </td>
         </tr>
@@ -331,9 +335,17 @@ var _forceDeleteNetId = null;
 
 function deleteNetwork(id, name) {
   _forceDeleteNetId = id;
-  document.getElementById('forceDeleteMsg').innerHTML =
-    'La rete <strong>"' + name + '"</strong> e tutti i suoi indirizzi IP verranno' +
-    ' <strong>eliminati definitivamente</strong> e l\'operazione non sarà reversibile.';
+  var msg = document.getElementById('forceDeleteMsg');
+  msg.innerHTML = '';
+  msg.appendChild(document.createTextNode('La rete '));
+  var s1 = document.createElement('strong');
+  s1.textContent = '"' + name + '"';
+  msg.appendChild(s1);
+  msg.appendChild(document.createTextNode(' e tutti i suoi indirizzi IP verranno '));
+  var s2 = document.createElement('strong');
+  s2.textContent = 'eliminati definitivamente';
+  msg.appendChild(s2);
+  msg.appendChild(document.createTextNode(' e l\'operazione non sarà reversibile.'));
   document.getElementById('forceDeleteConfirmInput').value = '';
   document.getElementById('btnForceDeleteConfirm').disabled = true;
   openModal('modalForceDelete');
