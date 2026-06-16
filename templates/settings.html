@@ -211,9 +211,9 @@
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:.9rem;margin-bottom:.9rem">
     <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
-      Server LDAP
+      Server LDAP <span style="color:#e05252;font-size:.75rem;font-weight:600" title="Usare ldaps:// per cifrare le credenziali in transito">[usare ldaps://]</span>
       <input type="text" id="ldap_server" class="form-control"
-             placeholder="ldap://dc01.phoenix.loc" style="font-family:monospace;font-size:.85rem">
+             placeholder="ldaps://dc01.example.loc" style="font-family:monospace;font-size:.85rem">
     </label>
     <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
       Base DN
