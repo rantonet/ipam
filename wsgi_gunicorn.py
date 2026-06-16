@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 # wsgi_gunicorn.py -- Entry point per Gunicorn
 #
-# Architettura:
-#   Browser -> Apache :80 -> ProxyPass /ipam -> Gunicorn :8000/ipam -> Flask
+# Architettura (HTTPS obbligatorio in produzione):
+#   Browser -> Apache :443 (TLS) -> ProxyPass /ipam -> Gunicorn :8000/ipam -> Flask
+#   Il VirtualHost :80 reindirizza su HTTPS prima di raggiungere questa app.
 #
-# Richiede in Apache (VirtualHost o httpd.conf):
-#   ProxyPreserveHost On
-#   RequestHeader set X-Forwarded-Host %{HTTP_HOST}s
-#   RequestHeader set X-Forwarded-Proto %{REQUEST_SCHEME}s
+# Richiede nel VirtualHost :443 di Apache (ipam.conf):
+#   SSLEngine on
+#   RequestHeader set X-Forwarded-Proto "https"
 #
 # Il middleware ReverseProxied:
 #   - Ripristina HTTP_HOST dall'header X-Forwarded-Host (hostname reale del browser)
+#   - Propaga wsgi.url_scheme = "https" dall'header X-Forwarded-Proto
+#     (necessario per SESSION_COOKIE_SECURE e url_for() con _scheme='https')
 #   - Imposta SCRIPT_NAME=/ipam in modo che url_for() generi link corretti
 
 import sys
