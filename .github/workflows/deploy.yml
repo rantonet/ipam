@@ -42,7 +42,8 @@ jobs:
           IPAM_DATABASE_URI: "sqlite:///:memory:"
           IPAM_SEED: "0"
         run: |
-          pytest test_app.py -v --tb=short
+          pip install pytest --quiet
+          python -m pytest test_app.py -v --tb=short
 
   # ─────────────────────────────────────────────
   # JOB 2: genera artefatto zip
