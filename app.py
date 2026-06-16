@@ -3,12 +3,12 @@
 IPAM - IP Address Management System
 Backend: Python 3 / Flask
 Server:  Apache 2.4 + mod_wsgi
-Path:    http://<server>/ipam/
+Path:    https://<server>/ipam/
 Version: 1.3.0
 """
 
 # ── Versione e changelog ──────────────────────────────────────────────────────
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.9.2"
 APP_BUILD   = "2026-05-28"
 APP_CHANGELOG = [
     {
@@ -39,6 +39,8 @@ APP_CHANGELOG = [
 
 import os
 import sys
+import threading
+import time
 
 # Forza stdout/stderr a UTF-8 anche su sistemi con locale latin-1 (es. CentOS 7)
 if hasattr(sys.stdout, 'reconfigure'):
@@ -61,15 +63,60 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
-#  Chiave segreta (in produzione usare variabile d'ambiente)
-app.config['SECRET_KEY'] = os.environ.get('IPAM_SECRET', 'ipam-secret-key-changeme')
+import secrets as _secrets
+import logging as _startup_log
+_startup_log.basicConfig()
+
+def _load_or_generate_secret_key():
+    """
+    Carica IPAM_SECRET dall'ambiente; se assente genera una chiave
+    casuale e la persiste in instance/secret_key.txt in modo che
+    i riavvii usino sempre la stessa chiave senza rompere le sessioni.
+    Non usare la chiave hardcoded in produzione.
+    """
+    env_key = os.environ.get('IPAM_SECRET', '').strip()
+    if env_key and env_key != 'ipam-secret-key-changeme':
+        return env_key
+    key_file = os.path.join(BASE_DIR, 'instance', 'secret_key.txt')
+    if os.path.exists(key_file):
+        try:
+            with open(key_file, 'r') as _f:
+                stored = _f.read().strip()
+            if len(stored) >= 32:
+                return stored
+        except Exception:
+            pass
+    new_key = _secrets.token_hex(32)
+    try:
+        os.makedirs(os.path.join(BASE_DIR, 'instance'), exist_ok=True)
+        with open(key_file, 'w') as _f:
+            _f.write(new_key)
+        import stat as _stat
+        os.chmod(key_file, _stat.S_IRUSR | _stat.S_IWUSR)
+    except Exception as _e:
+        _startup_log.getLogger('ipam').warning('Impossibile salvare secret_key.txt: %s', _e)
+    if not env_key or env_key == 'ipam-secret-key-changeme':
+        _startup_log.getLogger('ipam').warning(
+            'IPAM_SECRET non impostato: usare la variabile d\'ambiente in produzione '
+            '(chiave generata automaticamente in instance/secret_key.txt)'
+        )
+    return new_key
+
+app.config['SECRET_KEY'] = _load_or_generate_secret_key()
 
 #  DATABASE: file nella sottocartella instance/ accanto ad app.py
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(BASE_DIR, 'instance', 'ipam.db')
+#  La variabile d'ambiente IPAM_DATABASE_URI permette di usare un DB diverso
+#  (es. sqlite:///:memory: nei test automatici) senza toccare la config.
+_default_db_uri = 'sqlite:///' + os.path.join(BASE_DIR, 'instance', 'ipam.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('IPAM_DATABASE_URI', _default_db_uri)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-#  PREFERRED URL SCHEME (HTTP in LAN, HTTPS in produzione)
-app.config['PREFERRED_URL_SCHEME'] = 'http'
+#  Cookie di sessione: httponly sempre; secure solo in produzione HTTPS.
+#  Impostare IPAM_COOKIE_SECURE=1 quando il frontend è servito via HTTPS
+#  (Apache/nginx con terminazione TLS). Non abilitare su HTTP puro.
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE']   = os.environ.get('IPAM_COOKIE_SECURE', '0') == '1'
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 db = SQLAlchemy(app)
 
@@ -95,8 +142,94 @@ except Exception:
 
 
 def _client_ip():
-    xff = request.headers.get('X-Forwarded-For', '')
-    return xff.split(',')[0].strip() if xff else (request.remote_addr or '-')
+    """Restituisce l'IP client per il logging in modo sicuro.
+
+    Quando siamo dietro un reverse proxy fidato (remote_addr è loopback o
+    privato RFC-1918, come Apache su 127.0.0.1), leggiamo X-Forwarded-For
+    prendendo il valore più a DESTRA della catena, ovvero quello aggiunto
+    dall'ultimo proxy fidato (Apache).  Questo è il comportamento di
+    Werkzeug ProxyFix con x_for=1: resiste alla falsificazione da parte di
+    client che iniettano valori a sinistra della lista XFF.
+
+    Se remote_addr non è un proxy fidato (connessione diretta), si usa
+    remote_addr così com'è — non è falsificabile.
+
+    Il candidato viene validato come indirizzo IP; in caso di formato non
+    valido si ricade su remote_addr.
+    """
+    remote = request.remote_addr or ''
+    try:
+        addr = ipaddress.ip_address(remote)
+        if addr.is_loopback or addr.is_private:
+            xff = request.headers.get('X-Forwarded-For', '')
+            if xff:
+                # Prendi il rightmost (aggiunto dal proxy fidato), non il leftmost
+                candidate = xff.split(',')[-1].strip()
+                try:
+                    ipaddress.ip_address(candidate)  # valida il formato
+                    return candidate
+                except ValueError:
+                    pass  # XFF malformato: ricadi su remote_addr
+    except ValueError:
+        pass
+    return remote or '-'
+
+
+# ── Rate limiting login ────────────────────────────────────────────
+# Contatore in-memory dei tentativi falliti per coppia (ip, username).
+# Tracciare per coppia impedisce che un login riuscito con un account
+# valido azzeri i contatori per altri account dallo stesso IP (bypass
+# del lockout tramite account compromessi o a basso privilegio).
+# Dopo _LOGIN_MAX_ATTEMPTS fallimenti nella stessa finestra temporale,
+# la coppia (ip, username) viene bloccata per _LOGIN_LOCKOUT_SECONDS.
+
+_LOGIN_MAX_ATTEMPTS   = 10       # tentativi falliti prima del lockout
+_LOGIN_WINDOW_SECONDS = 300      # finestra di osservazione (5 minuti)
+_LOGIN_LOCKOUT_SECONDS = 900     # durata del blocco (15 minuti)
+
+_login_attempts: dict = {}       # (ip, username) -> {'count', 'window_start', 'blocked_until'}
+_login_attempts_lock = threading.Lock()
+
+
+def _login_check_rate_limit(ip, username):
+    """Restituisce (blocked: bool, retry_after_seconds: int)."""
+    now = time.time()
+    key = (ip, username.lower())
+    with _login_attempts_lock:
+        entry = _login_attempts.get(key)
+        if not entry:
+            return False, 0
+        blocked_until = entry.get('blocked_until', 0)
+        if blocked_until > now:
+            return True, int(blocked_until - now)
+        if now - entry.get('window_start', 0) > _LOGIN_WINDOW_SECONDS:
+            _login_attempts.pop(key, None)
+            return False, 0
+        return False, 0
+
+
+def _login_record_failure(ip, username):
+    """Registra un tentativo fallito; restituisce True se ora siamo in lockout."""
+    now = time.time()
+    key = (ip, username.lower())
+    with _login_attempts_lock:
+        entry = _login_attempts.get(key)
+        if not entry or now - entry.get('window_start', 0) > _LOGIN_WINDOW_SECONDS:
+            entry = {'count': 0, 'window_start': now, 'blocked_until': 0}
+            _login_attempts[key] = entry
+        entry['count'] += 1
+        if entry['count'] >= _LOGIN_MAX_ATTEMPTS:
+            entry['blocked_until'] = now + _LOGIN_LOCKOUT_SECONDS
+            return True
+        return False
+
+
+def _login_reset(ip, username):
+    """Azzera i contatori solo per la coppia (ip, username) dopo un login riuscito.
+    Non tocca i contatori di altri account dallo stesso IP."""
+    key = (ip, username.lower())
+    with _login_attempts_lock:
+        _login_attempts.pop(key, None)
 
 
 #  MODELS 
@@ -476,6 +609,23 @@ def _require_login():
         return redirect(url_for('auth_login', next=request.full_path))
 
 
+def _admin_required(fn):
+    """Decorator: richiede current_user.is_admin == True."""
+    from functools import wraps
+    @wraps(fn)
+    def _wrapper(*args, **kwargs):
+        if not current_user.is_authenticated:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Non autenticato', 'login': True}), 401
+            return redirect(url_for('auth_login', next=request.full_path))
+        if not current_user.is_admin:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Accesso negato: richiesti privilegi di amministratore'}), 403
+            return render_template('403.html'), 403
+        return fn(*args, **kwargs)
+    return _wrapper
+
+
 def _dn_to_cn(dn):
     for part in str(dn).split(','):
         p = part.strip()
@@ -484,11 +634,27 @@ def _dn_to_cn(dn):
     return str(dn)
 
 
+def _ldap_make_server(server_url):
+    """
+    Crea un oggetto ldap3.Server SOLO per URL ldaps://.
+    Solleva ValueError per qualsiasi schema non cifrato (ldap://) per
+    impedire che bind e password utente transitino in chiaro.
+    """
+    from ldap3 import Server, ALL
+    if not server_url.lower().startswith('ldaps://'):
+        raise ValueError(
+            'Trasporto LDAP in chiaro non consentito. '
+            'Configurare il server con schema ldaps:// (es. ldaps://dc01.example.loc). '
+            'Le connessioni ldap:// espongono credenziali e password in chiaro sulla rete.'
+        )
+    return Server(server_url, get_info=ALL, use_ssl=True, connect_timeout=5)
+
+
 def _ldap_authenticate(username, password):
     """Autentica via LDAP/AD o OpenLDAP. Restituisce AuthUser o None."""
     ip = _client_ip()
     try:
-        from ldap3 import Server, Connection, ALL, SUBTREE
+        from ldap3 import Connection, SUBTREE
         server_url     = _cfg_get('ldap_server',        '').strip()
         base_dn        = _cfg_get('ldap_base_dn',       '').strip()
         bind_dn        = _cfg_get('ldap_bind_dn',       '').strip()
@@ -500,7 +666,12 @@ def _ldap_authenticate(username, password):
         if not server_url or not base_dn:
             return None
 
-        srv = Server(server_url, get_info=ALL, connect_timeout=5)
+        try:
+            srv = _ldap_make_server(server_url)
+        except ValueError as e:
+            _auth_log.error('LDAP_BLOCKED | %-20s | ldap | %s | %s', username, ip, e)
+            return None
+
         try:
             if bind_dn:
                 conn = Connection(srv, user=bind_dn, password=bind_pw, auto_bind=True)
@@ -627,8 +798,20 @@ def auth_login():
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         ip = _client_ip()
+
+        # Verifica rate limit prima di elaborare le credenziali
+        blocked, retry_after = _login_check_rate_limit(ip, username)
+        if blocked:
+            minuti = (retry_after + 59) // 60
+            _auth_log.warning('RATE_LIMIT | %-20s | -      | %s | IP+account bloccato, retry tra %ds',
+                              username, ip, retry_after)
+            error = 'Troppi tentativi falliti. Riprova tra {} minuto{}.'.format(
+                minuti, 'i' if minuti != 1 else 'o')
+            return render_template('login.html', error=error, version=APP_VERSION), 429
+
         user = _do_login(username, password)
         if user:
+            _login_reset(ip, username)
             login_user(user)
             _auth_log.info('LOGIN_OK   | %-20s | %-6s | %s', user.username, user.source, ip)
             nxt = request.args.get('next', '').strip().rstrip('?')
@@ -638,7 +821,16 @@ def auth_login():
                     and nxt not in ('', '/') and nxt.startswith(script)):
                 return redirect(nxt)
             return redirect(url_for('index'))
+
+        locked_out = _login_record_failure(ip, username)
         _auth_log.warning('LOGIN_FAIL | %-20s | -      | %s | credenziali non valide', username, ip)
+        if locked_out:
+            minuti = (_LOGIN_LOCKOUT_SECONDS + 59) // 60
+            _auth_log.warning('RATE_LIMIT | %-20s | -      | %s | IP+account bloccato dopo troppi fallimenti',
+                              username, ip)
+            error = 'Troppi tentativi falliti. Riprova tra {} minuto{}.'.format(
+                minuti, 'i' if minuti != 1 else 'o')
+            return render_template('login.html', error=error, version=APP_VERSION), 429
         error = 'Credenziali non valide'
     return render_template('login.html', error=error, version=APP_VERSION)
 
@@ -656,6 +848,7 @@ def auth_logout():
 # ── API: Log autenticazione ────────────────────────────────────────
 
 @app.route('/api/settings/auth-log')
+@_admin_required
 def api_auth_log():
     try:
         n = min(int(request.args.get('lines', 200)), 1000)
@@ -677,12 +870,14 @@ def api_auth_log():
 # ── API: Utenti Locali ─────────────────────────────────────────────
 
 @app.route('/api/settings/local-users', methods=['GET'])
+@_admin_required
 def api_local_users_list():
     users = LocalUser.query.order_by(LocalUser.id).all()
     return jsonify([u.to_dict() for u in users])
 
 
 @app.route('/api/settings/local-users', methods=['POST'])
+@_admin_required
 def api_local_users_create():
     data     = request.get_json() or {}
     username = (data.get('username') or '').strip()
@@ -704,6 +899,7 @@ def api_local_users_create():
 
 
 @app.route('/api/settings/local-users/<int:uid>', methods=['PUT'])
+@_admin_required
 def api_local_users_update(uid):
     u    = LocalUser.query.get_or_404(uid)
     data = request.get_json() or {}
@@ -720,6 +916,7 @@ def api_local_users_update(uid):
 
 
 @app.route('/api/settings/local-users/<int:uid>', methods=['DELETE'])
+@_admin_required
 def api_local_users_delete(uid):
     u = LocalUser.query.get_or_404(uid)
     if u.is_admin:
@@ -742,13 +939,23 @@ _SNMP_KEYS = ['snmp_enabled', 'snmp_community', 'snmp_version',
 
 
 @app.route('/api/settings/ldap', methods=['GET'])
+@_admin_required
 def api_ldap_get():
     return jsonify({k: _cfg_get(k, '') for k in _LDAP_KEYS})
 
 
 @app.route('/api/settings/ldap', methods=['PUT'])
+@_admin_required
 def api_ldap_save():
     data = request.get_json() or {}
+    server_url = (data.get('ldap_server') or '').strip()
+    if server_url and not server_url.lower().startswith('ldaps://'):
+        return jsonify({
+            'ok': False,
+            'error': 'Server LDAP non valido: usare ldaps:// per garantire la cifratura '
+                     'delle credenziali in transito (es. ldaps://dc01.example.loc). '
+                     'Le connessioni ldap:// non sono consentite.'
+        }), 400
     for k in _LDAP_KEYS:
         if k in data:
             _cfg_set(k, data[k] or '')
@@ -756,6 +963,7 @@ def api_ldap_save():
 
 
 @app.route('/api/settings/ldap/test', methods=['POST'])
+@_admin_required
 def api_ldap_test():
     data     = request.get_json() or {}
     username = (data.get('username') or '').strip()
@@ -763,7 +971,7 @@ def api_ldap_test():
     if not username or not password:
         return jsonify({'error': 'Inserire username e password di test'}), 400
     try:
-        from ldap3 import Server, Connection, ALL, SUBTREE
+        from ldap3 import Connection, SUBTREE
         server_url     = _cfg_get('ldap_server',        '').strip()
         base_dn        = _cfg_get('ldap_base_dn',       '').strip()
         bind_dn        = _cfg_get('ldap_bind_dn',       '').strip()
@@ -774,7 +982,11 @@ def api_ldap_test():
         if not server_url or not base_dn:
             return jsonify({'ok': False, 'detail': 'Server LDAP e Base DN obbligatori'}), 400
 
-        srv = Server(server_url, get_info=ALL, connect_timeout=5)
+        try:
+            srv = _ldap_make_server(server_url)
+        except ValueError as e:
+            return jsonify({'ok': False, 'detail': str(e)}), 400
+
         try:
             if bind_dn:
                 conn = Connection(srv, user=bind_dn, password=bind_pw, auto_bind=True)
@@ -869,11 +1081,13 @@ def api_ldap_test():
 # ── API: Configurazione SNMP Discovery ────────────────────────────
 
 @app.route('/api/settings/snmp', methods=['GET'])
+@_admin_required
 def api_snmp_get():
     return jsonify({k: _cfg_get(k, '') for k in _SNMP_KEYS})
 
 
 @app.route('/api/settings/snmp', methods=['PUT'])
+@_admin_required
 def api_snmp_save():
     data = request.get_json() or {}
     for k in _SNMP_KEYS:
@@ -885,6 +1099,7 @@ def api_snmp_save():
 # ── API: SNMP Discovery ────────────────────────────────────────────
 
 @app.route('/api/snmp/discover', methods=['POST'])
+@_admin_required
 def api_snmp_discover_start():
     try:
         from snmp_discovery import run_discovery, _disc_status
@@ -899,6 +1114,7 @@ def api_snmp_discover_start():
 
 
 @app.route('/api/snmp/discover/status', methods=['GET'])
+@_admin_required
 def api_snmp_discover_status():
     try:
         from snmp_discovery import _disc_status
@@ -910,6 +1126,7 @@ def api_snmp_discover_status():
 # ── API: Log Scansioni ────────────────────────────────────────────
 
 @app.route('/api/logs', methods=['GET'])
+@_admin_required
 def api_logs():
     scan_type = request.args.get('type', '').strip()
     limit     = min(int(request.args.get('limit', 200)), 500)
@@ -921,6 +1138,7 @@ def api_logs():
 
 
 @app.route('/api/logs/<int:log_id>', methods=['DELETE'])
+@_admin_required
 def api_log_delete(log_id):
     entry = ScanLog.query.get_or_404(log_id)
     db.session.delete(entry)
@@ -929,6 +1147,7 @@ def api_log_delete(log_id):
 
 
 @app.route('/api/logs/clear', methods=['POST'])
+@_admin_required
 def api_logs_clear():
     data      = request.get_json() or {}
     scan_type = data.get('type', '').strip()
@@ -941,6 +1160,7 @@ def api_logs_clear():
 
 
 @app.route('/logs')
+@_admin_required
 def scan_logs_page():
     return render_template('logs.html')
 
@@ -1428,12 +1648,14 @@ def api_network_tree():
 
 
 @app.route('/api/networks/tree/invalidate', methods=['POST'])
+@_admin_required
 def api_tree_invalidate():
     _tree_cache['ts'] = 0.0
     return jsonify({'message': 'Cache invalidata'})
 
 
 @app.route('/api/networks', methods=['POST'])
+@_admin_required
 def api_create_network():
     try:
         data = request.get_json()
@@ -1548,6 +1770,7 @@ def api_create_network():
 
 
 @app.route('/api/networks/<int:net_id>', methods=['PUT'])
+@_admin_required
 def api_update_network(net_id):
     network = Network.query.get_or_404(net_id)
     data    = request.get_json()
@@ -1561,6 +1784,7 @@ def api_update_network(net_id):
 
 
 @app.route('/api/networks/<int:net_id>', methods=['DELETE'])
+@_admin_required
 def api_delete_network(net_id):
     network   = Network.query.get_or_404(net_id)
     force     = request.args.get('force', '0') == '1'
@@ -1584,6 +1808,7 @@ _NET_EDITABLE = ['name','location','description','country','site','usage',
 _IP_EDITABLE  = ['hostname','mac_address','device_type','status','description']
 
 @app.route('/api/bulk-edit/networks', methods=['PUT'])
+@_admin_required
 def api_bulk_edit_networks():
     data   = request.get_json()
     ids    = data.get('ids', [])
@@ -1608,6 +1833,7 @@ def api_bulk_edit_networks():
 
 
 @app.route('/api/bulk-edit/ip-records', methods=['PUT'])
+@_admin_required
 def api_bulk_edit_ip_records():
     data   = request.get_json()
     ids    = data.get('ids', [])
@@ -1656,6 +1882,7 @@ def api_ip_records():
 
 
 @app.route('/api/ip-records', methods=['POST'])
+@_admin_required
 def api_create_ip():
     import socket as _s, struct as _st
     data = request.get_json()
@@ -1687,6 +1914,7 @@ def api_create_ip():
 
 
 @app.route('/api/ip-records/<int:rec_id>', methods=['PUT'])
+@_admin_required
 def api_update_ip(rec_id):
     record = IPRecord.query.get_or_404(rec_id)
     data   = request.get_json()
@@ -1699,6 +1927,7 @@ def api_update_ip(rec_id):
 
 
 @app.route('/api/ip-records/<int:rec_id>', methods=['DELETE'])
+@_admin_required
 def api_delete_ip(rec_id):
     record = IPRecord.query.get_or_404(rec_id)
     db.session.delete(record)
@@ -1707,6 +1936,7 @@ def api_delete_ip(rec_id):
 
 
 @app.route('/api/ip-records/<int:rec_id>/clear', methods=['PUT'])
+@_admin_required
 def api_clear_ip(rec_id):
     record = IPRecord.query.get_or_404(rec_id)
     record.hostname    = None
@@ -1727,6 +1957,7 @@ def api_vlans():
 
 
 @app.route('/api/vlans', methods=['POST'])
+@_admin_required
 def api_create_vlan():
     data = request.get_json()
     if VLan.query.filter_by(vlan_id=data['vlan_id']).first():
@@ -1743,6 +1974,7 @@ def api_create_vlan():
 
 
 @app.route('/api/vlans/<int:v_id>', methods=['PUT'])
+@_admin_required
 def api_update_vlan(v_id):
     vlan = VLan.query.get_or_404(v_id)
     data = request.get_json()
@@ -1754,6 +1986,7 @@ def api_update_vlan(v_id):
 
 
 @app.route('/api/vlans/<int:v_id>', methods=['DELETE'])
+@_admin_required
 def api_delete_vlan(v_id):
     vlan = VLan.query.get_or_404(v_id)
     db.session.delete(vlan)
@@ -1795,6 +2028,7 @@ def api_stats():
 # ── SCAN API ─────────────────────────────────────────────────────
 
 @app.route('/api/networks/<int:net_id>/scan', methods=['POST'])
+@_admin_required
 def api_start_scan(net_id):
     """Avvia lo scan asincrono di una subnet."""
     network = Network.query.get_or_404(net_id)
@@ -1812,6 +2046,7 @@ def api_start_scan(net_id):
 
 
 @app.route('/api/networks/<int:net_id>/scan/status', methods=['GET'])
+@_admin_required
 def api_scan_status(net_id):
     """Restituisce lo stato dello scan per una subnet."""
     try:
@@ -1823,6 +2058,7 @@ def api_scan_status(net_id):
 
 
 @app.route('/api/scan/status', methods=['GET'])
+@_admin_required
 def api_scan_status_all():
     """Restituisce lo stato di tutti gli scan in corso."""
     try:
@@ -1833,6 +2069,7 @@ def api_scan_status_all():
 
 
 @app.route('/api/scan/test-ip', methods=['GET'])
+@_admin_required
 def api_scan_test_ip():
     """
     Diagnostica scanner su un singolo IP.
@@ -1915,11 +2152,13 @@ def api_scan_test_ip():
 #  IMPOSTAZIONI 
 
 @app.route('/settings')
+@_admin_required
 def settings():
     return render_template('settings.html')
 
 
 @app.route('/api/settings', methods=['GET'])
+@_admin_required
 def api_settings_get():
     return jsonify({
         'dns_primary':          _cfg_get('dns_primary',   ''),
@@ -1932,6 +2171,7 @@ def api_settings_get():
 
 
 @app.route('/api/settings', methods=['PUT'])
+@_admin_required
 def api_settings_put():
     data = request.get_json() or {}
     if 'dns_primary' in data:
@@ -1953,6 +2193,7 @@ def api_settings_put():
 
 
 @app.route('/api/settings/dns/test', methods=['GET'])
+@_admin_required
 def api_settings_dns_test():
     primary   = _cfg_get('dns_primary',   '').strip()
     secondary = _cfg_get('dns_secondary', '').strip()
@@ -2005,12 +2246,14 @@ def _group_to_dict(g):
 
 
 @app.route('/api/settings/scan-groups', methods=['GET'])
+@_admin_required
 def api_scan_groups_list():
     groups = ScanGroup.query.order_by(ScanGroup.id).all()
     return jsonify([_group_to_dict(g) for g in groups])
 
 
 @app.route('/api/settings/scan-groups', methods=['POST'])
+@_admin_required
 def api_scan_groups_create():
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -2029,6 +2272,7 @@ def api_scan_groups_create():
 
 
 @app.route('/api/settings/scan-groups/<int:gid>', methods=['PUT'])
+@_admin_required
 def api_scan_groups_update(gid):
     g    = ScanGroup.query.get_or_404(gid)
     data = request.get_json() or {}
@@ -2046,6 +2290,7 @@ def api_scan_groups_update(gid):
 
 
 @app.route('/api/settings/scan-groups/<int:gid>', methods=['DELETE'])
+@_admin_required
 def api_scan_groups_delete(gid):
     g = ScanGroup.query.get_or_404(gid)
     db.session.delete(g)
@@ -2055,6 +2300,7 @@ def api_scan_groups_delete(gid):
 
 
 @app.route('/api/settings/scan-groups/<int:gid>/items', methods=['POST'])
+@_admin_required
 def api_scan_group_items_add(gid):
     ScanGroup.query.get_or_404(gid)
     data       = request.get_json() or {}
@@ -2074,6 +2320,7 @@ def api_scan_group_items_add(gid):
 
 
 @app.route('/api/settings/scan-groups/<int:gid>/items/<int:iid>', methods=['DELETE'])
+@_admin_required
 def api_scan_group_items_delete(gid, iid):
     it = ScanGroupItem.query.filter_by(id=iid, group_id=gid).first_or_404()
     db.session.delete(it)
@@ -2082,6 +2329,7 @@ def api_scan_group_items_delete(gid, iid):
 
 
 @app.route('/api/venv-info')
+@_admin_required
 def api_venv_info():
     import sys, subprocess, os, re
     python_version = sys.version
@@ -2135,6 +2383,7 @@ def api_venv_info():
 
 
 @app.route('/api/settings/scan-groups/<int:gid>/run', methods=['POST'])
+@_admin_required
 def api_scan_group_run(gid):
     g = ScanGroup.query.get_or_404(gid)
     try:
@@ -2397,11 +2646,17 @@ def _add_random_ips(net, addr, cidr, random_inst):
 #  INIT 
 
 def _ensure_indexes():
-    """Crea gli indici mancanti e migra ip_int (idempotente)."""
+    """Crea gli indici mancanti e migra ip_int (idempotente).
+    Salta silenziosamente se si usa un DB SQLite in memoria (test)."""
     import sqlite3 as _sq3, socket as _sock, struct as _st, logging as _lg
     _log = _lg.getLogger('ipam')
     try:
-        _db_path = os.path.join(BASE_DIR, 'instance', 'ipam.db')
+        _uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+        if _uri.startswith('sqlite:///') and _uri[10:] not in ('', ':memory:'):
+            _db_path = _uri[10:]
+        else:
+            _log.debug('_ensure_indexes: skip (DB non è un file SQLite)')
+            return
         _con = _sq3.connect(_db_path)
 
         # ── Migrazione colonna ip_int ──────────────────────────────────────────
@@ -2458,19 +2713,22 @@ with app.app_context():
     _ensure_indexes()
 
     # Migrazione colonne SNMP (aggiunge se non esistono)
+    # Salta silenziosamente se si usa un DB in memoria (test)
     try:
         import sqlite3 as _sq3
-        _db_path = os.path.join(BASE_DIR, 'instance', 'ipam.db')
-        _con = _sq3.connect(_db_path)
-        _cur = _con.cursor()
-        _existing = {r[1] for r in _cur.execute('PRAGMA table_info(ip_records)')}
-        for _col, _def in [('switch_name',     'VARCHAR(100)'),
-                            ('switch_port',     'VARCHAR(50)'),
-                            ('snmp_updated_at', 'DATETIME')]:
-            if _col not in _existing:
-                _cur.execute('ALTER TABLE ip_records ADD COLUMN {} {}'.format(_col, _def))
-        _con.commit()
-        _con.close()
+        _uri_m = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+        if _uri_m.startswith('sqlite:///') and _uri_m[10:] not in ('', ':memory:'):
+            _db_path_m = _uri_m[10:]
+            _con = _sq3.connect(_db_path_m)
+            _cur = _con.cursor()
+            _existing = {r[1] for r in _cur.execute('PRAGMA table_info(ip_records)')}
+            for _col, _def in [('switch_name',     'VARCHAR(100)'),
+                                ('switch_port',     'VARCHAR(50)'),
+                                ('snmp_updated_at', 'DATETIME')]:
+                if _col not in _existing:
+                    _cur.execute('ALTER TABLE ip_records ADD COLUMN {} {}'.format(_col, _def))
+            _con.commit()
+            _con.close()
     except Exception as _e:
         import logging as _lg
         _lg.getLogger('ipam').warning('Migrazione SNMP columns: %s', _e)
@@ -2480,11 +2738,27 @@ with app.app_context():
     _update_scanner_dns()
     # Crea utente admin locale di default se non esiste
     if not LocalUser.query.filter_by(username='admin').first():
+        import secrets as _sec
+        _auto_pw = _sec.token_urlsafe(16)
         _admin = LocalUser(username='admin', display_name='Amministratore',
                            is_admin=True, enabled=True)
-        _admin.set_password('admin')
+        _admin.set_password(_auto_pw)
         db.session.add(_admin)
         db.session.commit()
+        _auth_log.warning(
+            'ADMIN_CREATED | password iniziale generata automaticamente: %s'
+            ' — cambiarla immediatamente dopo il primo accesso', _auto_pw
+        )
+        import sys as _sys
+        print(
+            '\n*** IPAM — Primo avvio ***\n'
+            'Utente admin creato con password generata casualmente.\n'
+            'Username : admin\n'
+            'Password : {}\n'
+            'Cambiare la password immediatamente dopo il primo accesso.\n'.format(_auto_pw),
+            file=_sys.stderr,
+            flush=True,
+        )
 
 _init_scheduler(app)
 
