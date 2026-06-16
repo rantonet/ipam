@@ -6,3 +6,4 @@ gunicorn>=21.0
 dnspython>=2.4
 apscheduler>=3.10
 ldap3>=2.9
+pytest>=7.4
