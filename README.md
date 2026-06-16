@@ -18,7 +18,7 @@
 
 | Versione | Data | Download |
 |---|---|---|
-| **v1.9.0** | 2026-05-29 | [ipam_v1.9.0_20260529.zip](https://github.com/rantonet/ipam/releases/download/v1.9.0/ipam_v1.9.0_20260529.zip) |
+| **v1.9.2** | 2026-06-16 | [ipam_v1.9.2_20260616.zip](https://github.com/rantonet/ipam/releases/download/v1.9.2/ipam_v1.9.2_20260616.zip) |
 
 Tutte le versioni sono disponibili nella pagina [**Releases**](https://github.com/rantonet/ipam/releases).
 
@@ -128,8 +128,8 @@ Le dipendenze Python vengono installate automaticamente dallo script di installa
 
 ```bash
 # 1. Scarica e decomprimi il pacchetto (crea automaticamente la cartella deploy_ipam/)
-wget https://github.com/rantonet/ipam/releases/download/v1.9.0/ipam_v1.9.0_20260529.zip
-unzip ipam_v1.9.0_20260529.zip
+wget https://github.com/rantonet/ipam/releases/download/v1.9.2/ipam_v1.9.2_20260616.zip
+unzip ipam_v1.9.2_20260616.zip
 cd deploy_ipam
 
 # 2. Esegui lo script di installazione (richiede sudo)
@@ -201,7 +201,7 @@ WantedBy=multi-user.target
 
 ```bash
 # 1. Scarica il nuovo pacchetto e decomprimi
-unzip ipam_v1.9.0_20260528.zip -d /tmp/ipam_update
+unzip ipam_v1.9.2_20260616.zip -d /tmp/ipam_update
 cd /tmp/ipam_update
 
 # 2. Esegui lo script di aggiornamento
@@ -220,25 +220,55 @@ Lo script `update.sh`:
 
 ## Configurazione Apache
 
-Copia il file `ipam.conf` nella directory di configurazione di Apache e ricarica il servizio:
+> **SICUREZZA:** Configurare sempre HTTPS prima di esporre l'applicazione in produzione.
+> Senza TLS le credenziali di login e i cookie di sessione viaggiano in chiaro.
+
+Il file `ipam.conf` incluso nel repository configura già Apache con **HTTPS obbligatorio**:
+un VirtualHost `:80` che redirige su HTTPS e un VirtualHost `:443` con SSL e proxy verso Gunicorn.
+Prima di copiarlo, adattare `ServerName` e i percorsi del certificato TLS.
+
+**Installazione consigliata (automatica con `install.sh`):**
 
 ```bash
+sudo ./install.sh
+# → genera certificato TLS autofirmato, configura Apache HTTPS, avvia Gunicorn
+```
+
+**Installazione manuale (Debian/Ubuntu):**
+
+```bash
+# 1. Generare certificato TLS autofirmato (se non si ha un certificato firmato)
+sudo openssl req -x509 -newkey rsa:2048 \
+    -keyout /etc/ssl/private/ipam.key -out /etc/ssl/certs/ipam.crt \
+    -days 3650 -nodes -subj "/CN=$(hostname -f)/O=IPAM/C=IT"
+sudo chmod 600 /etc/ssl/private/ipam.key
+
+# 2. Adattare ipam.conf (ServerName, percorsi SSL, directory installazione)
+#    poi copiarlo e abilitarlo
 sudo cp ipam.conf /etc/apache2/sites-available/ipam.conf
 sudo a2ensite ipam
-sudo a2enmod proxy proxy_http
+sudo a2enmod proxy proxy_http ssl headers
 sudo systemctl reload apache2
 ```
 
-Contenuto di `ipam.conf`:
+**Installazione manuale (RHEL/Rocky/CentOS):**
 
-```apache
-<VirtualHost *:80>
-    ProxyPass        /ipam  http://127.0.0.1:8000/ipam
-    ProxyPassReverse /ipam  http://127.0.0.1:8000/ipam
-</VirtualHost>
+```bash
+sudo yum install mod_ssl   # o: dnf install mod_ssl
+# Adattare ipam.conf (ServerName, percorsi, directory)
+sudo cp ipam.conf /etc/httpd/conf.d/ipam.conf
+sudo systemctl reload httpd
 ```
 
-L'applicazione sarà accessibile su `http://<server>/ipam`.
+Per ottenere un certificato firmato gratuitamente con Let's Encrypt:
+
+```bash
+sudo apt install certbot python3-certbot-apache   # Debian/Ubuntu
+sudo certbot --apache -d ipam.example.com
+```
+
+L'applicazione sarà accessibile su `https://<server>/ipam`.
+Il traffico HTTP (porta 80) viene automaticamente reindirizzato su HTTPS.
 
 ---
 
@@ -299,9 +329,11 @@ Gestione dei **Gruppi di Scansione** dalle Impostazioni:
 
 ### API REST
 
-Tutti gli endpoint restituiscono JSON. Prefisso base: `http://server/ipam/api/`.
+Tutti gli endpoint restituiscono JSON. Prefisso base: `https://server/ipam/api/`.
 
 **Autenticazione:** basata su cookie di sessione. Occorre prima effettuare il login e conservare il cookie per le chiamate successive.
+
+> **Nota:** Usare sempre HTTPS per le chiamate API. Con HTTP le credenziali e i cookie di sessione transitano in chiaro.
 
 | Metodo | Endpoint | Descrizione |
 |---|---|---|
@@ -338,18 +370,18 @@ L'API usa sessioni basate su cookie. Ogni client deve prima autenticarsi e poi i
 **curl:**
 ```bash
 # Login — salva il cookie in un file
-curl -s -c cookies.txt -X POST http://server/ipam/login \
+curl -s -c cookies.txt -X POST https://server/ipam/login \
   -d "username=admin&password=admin"
 
 # Verifica versione (con cookie)
-curl -s -b cookies.txt http://server/ipam/api/version
+curl -s -b cookies.txt https://server/ipam/api/version
 ```
 
 **Python (requests):**
 ```python
 import requests
 
-BASE = "http://server/ipam"
+BASE = "https://server/ipam"
 session = requests.Session()
 
 # Login — il cookie viene gestito automaticamente dalla session
@@ -591,7 +623,7 @@ python3 main.py
 venv/bin/python main.py
 ```
 
-L'app è disponibile su `http://localhost:5000/ipam`.
+L'app è disponibile su `http://localhost:5000/ipam` (solo sviluppo locale; non esporre su rete senza TLS).
 
 Credenziali default: `admin` / `admin` (da cambiare immediatamente in produzione).
 
