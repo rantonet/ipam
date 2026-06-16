@@ -271,22 +271,42 @@ if [[ "$FAMILY" == "redhat" ]]; then
 fi
 
 # ================================================================
-#  STEP 6 -- Servizio Gunicorn (systemd) + Apache reverse proxy
+#  STEP 6 -- Servizio Gunicorn (systemd) + Apache reverse proxy HTTPS
 #
 #  Architettura:
-#    Browser -> Apache :80 -> ProxyPass /ipam -> Gunicorn :8000/ipam -> Flask
+#    Browser -> Apache :443 (TLS) -> ProxyPass /ipam -> Gunicorn :8000 -> Flask
 #    Apache serve /ipam/static direttamente dal filesystem.
+#    Il VirtualHost :80 reindirizza tutto il traffico su HTTPS.
 #
 #  Gunicorn usa Python 3 nativo, evitando il problema mod_wsgi/Python 2.7.
 #  Il middleware ReverseProxied in wsgi_gunicorn.py imposta SCRIPT_NAME=/ipam
 #  in modo che Flask generi tutti gli URL con il prefisso corretto.
 # ================================================================
 echo ""
-echo "[6/6] Configuro Gunicorn (systemd) e Apache..."
+echo "[6/6] Configuro Gunicorn (systemd) e Apache (HTTPS)..."
 
 VENV_DIR="${INSTALL_DIR}/venv"
 GUNICORN_BIN="${VENV_DIR}/bin/gunicorn"
 PYTHON_BIN="${VENV_DIR}/bin/python3"
+SERVER_IP=$(hostname -I | awk '{print $1}')
+SERVER_FQDN=$(hostname -f 2>/dev/null || echo "${SERVER_IP}")
+
+# -- Certificato TLS: genera autofirmato se non esiste ----------
+TLS_KEY="/etc/ssl/private/ipam.key"
+TLS_CERT="/etc/ssl/certs/ipam.crt"
+if [[ ! -f "$TLS_KEY" ]] || [[ ! -f "$TLS_CERT" ]]; then
+    echo "  Generazione certificato TLS autofirmato (3650 giorni)..."
+    mkdir -p /etc/ssl/private
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout "$TLS_KEY" -out "$TLS_CERT" \
+        -days 3650 -nodes \
+        -subj "/CN=${SERVER_FQDN}/O=IPAM/C=IT" 2>/dev/null
+    chmod 600 "$TLS_KEY"
+    echo "  Certificato autofirmato: ${TLS_CERT}"
+    echo "  [WARN] Sostituire con certificato firmato (Let's Encrypt: certbot --apache)"
+else
+    echo "  Certificato TLS esistente riutilizzato: ${TLS_CERT}"
+fi
 
 # -- Servizio systemd -------------------------------------------
 cat > /etc/systemd/system/ipam.service << SVCEOF
@@ -300,6 +320,7 @@ Group=root
 WorkingDirectory=${INSTALL_DIR}
 Environment="PATH=${INSTALL_DIR}/venv/bin:/usr/local/bin:/usr/bin"
 Environment="IPAM_SEED=0"
+Environment="IPAM_COOKIE_SECURE=1"
 ExecStart=${GUNICORN_BIN} --bind 127.0.0.1:8000 --workers 1 --timeout 120 wsgi_gunicorn:application
 Restart=on-failure
 RestartSec=5s
@@ -318,52 +339,75 @@ else
     echo "  [WARN] Gunicorn non avviato. Controlla: journalctl -u ipam -n 30"
 fi
 
-# -- Configurazione Apache (generata con valori corretti) --------
+# -- Configurazione Apache: HTTP redirect + HTTPS proxy ---------
 cat > "${CONF_DEST}" << APACHECONF
 # ipam.conf -- generato da install.sh
-# Distro: ${FAMILY} | Dir: ${INSTALL_DIR} | User: ${APACHE_USER}
+# Distro: ${FAMILY} | Dir: ${INSTALL_DIR}
+# SICUREZZA: HTTP redirige su HTTPS; tutto il traffico e' cifrato.
 
-# File statici serviti direttamente da Apache (piu' veloce di Gunicorn)
-Alias /ipam/static ${INSTALL_DIR}/static
+# Redirect HTTP -> HTTPS
+<VirtualHost *:80>
+    ServerName ${SERVER_FQDN}
+    Redirect permanent / https://${SERVER_FQDN}/
+</VirtualHost>
 
-<Directory ${INSTALL_DIR}/static>
-    Options -Indexes
-    AllowOverride None
-    Require all granted
-</Directory>
+# Reverse proxy HTTPS verso Gunicorn
+<VirtualHost *:443>
+    ServerName ${SERVER_FQDN}
 
-# Proteggi il database SQLite
-<Directory ${INSTALL_DIR}/instance>
-    Require all denied
-</Directory>
+    SSLEngine on
+    SSLCertificateFile    ${TLS_CERT}
+    SSLCertificateKeyFile ${TLS_KEY}
 
-# Reverse proxy verso Gunicorn
-# ProxyPass /ipam/static ! esclude lo static dal proxy
-ProxyPass        /ipam/static !
-ProxyPass        /ipam  http://127.0.0.1:8000/ipam
-ProxyPassReverse /ipam  http://127.0.0.1:8000/ipam
+    # Informa Flask dello schema reale (richiesto per SESSION_COOKIE_SECURE)
+    RequestHeader set X-Forwarded-Proto "https"
+
+    # File statici serviti direttamente da Apache
+    Alias /ipam/static ${INSTALL_DIR}/static
+    <Directory ${INSTALL_DIR}/static>
+        Options -Indexes
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    # Proteggi il database SQLite
+    <Directory ${INSTALL_DIR}/instance>
+        Require all denied
+    </Directory>
+
+    # Reverse proxy verso Gunicorn (esclude /static)
+    ProxyPass        /ipam/static !
+    ProxyPass        /ipam  http://127.0.0.1:8000/ipam
+    ProxyPassReverse /ipam  http://127.0.0.1:8000/ipam
+</VirtualHost>
 APACHECONF
 
 echo "  ipam.conf generato in ${CONF_DEST}"
 
 # -- Attiva moduli e servizio Apache ----------------------------
 if [[ "$FAMILY" == "debian" ]]; then
-    a2enmod proxy proxy_http 2>/dev/null || true
-    a2enconf ipam
+    a2enmod proxy proxy_http ssl headers 2>/dev/null || true
+    a2enconf ipam 2>/dev/null || true
     systemctl enable --now apache2
     systemctl reload apache2
     if command -v ufw &>/dev/null && ufw status | grep -q "^Status: active"; then
         ufw allow 80/tcp
-        echo "  Firewall (ufw): porta 80/tcp aperta."
+        ufw allow 443/tcp
+        echo "  Firewall (ufw): porte 80/tcp e 443/tcp aperte."
     fi
 
 elif [[ "$FAMILY" == "redhat" ]]; then
+    # Installa mod_ssl se assente
+    if ! rpm -q mod_ssl &>/dev/null; then
+        yum install -y mod_ssl 2>/dev/null || dnf install -y mod_ssl 2>/dev/null || true
+    fi
     systemctl enable --now httpd
     systemctl reload httpd
     if systemctl is-active --quiet firewalld; then
         firewall-cmd --permanent --add-service=http
+        firewall-cmd --permanent --add-service=https
         firewall-cmd --reload
-        echo "  Firewall (firewalld): porta 80/tcp aperta."
+        echo "  Firewall (firewalld): porte 80/tcp e 443/tcp aperte."
     else
         echo "  [WARN] firewalld non attivo."
     fi
@@ -372,12 +416,17 @@ fi
 # ================================================================
 #  FINE
 # ================================================================
-SERVER_IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "===================================================="
-echo "  [OK] Installazione completata!"
+echo "  [OK] Installazione completata con HTTPS abilitato!"
 echo ""
-echo "  URL: http://${SERVER_IP}/ipam/"
+echo "  URL: https://${SERVER_FQDN}/ipam/"
+echo "  (HTTP porta 80 reindirizza automaticamente su HTTPS)"
+echo ""
+echo "  Certificato TLS: ${TLS_CERT}"
+echo "  [WARN] Se autofirmato, il browser mostrera' un avviso."
+echo "  Sostituire con certificato firmato (es. Let's Encrypt):"
+echo "    certbot --apache -d ${SERVER_FQDN}"
 echo ""
 echo "  Comandi utili:"
 if [[ "$FAMILY" == "debian" ]]; then
@@ -393,7 +442,7 @@ echo "  Log http : tail -f /etc/httpd/logs/error_log"
 fi
 echo ""
 echo "  Per aggiungere le tue reti:"
-echo "  -> http://${SERVER_IP}/ipam/networks"
+echo "  -> https://${SERVER_FQDN}/ipam/networks"
 echo ""
 echo "  Virtualenv Python: ${INSTALL_DIR}/venv"
 echo "  Gunicorn:          ${INSTALL_DIR}/venv/bin/gunicorn"
