@@ -27,6 +27,9 @@ from app import app as flask_app, db, LocalUser, Network, IPRecord, VLan, APP_VE
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+TEST_PASSWORD = 'TestPassword123!'
+
+
 @pytest.fixture(scope='module')
 def app():
     """
@@ -34,12 +37,19 @@ def app():
     Grazie a IPAM_DATABASE_URI impostato prima dell'import, l'app usa
     sqlite:///:memory: (con StaticPool automatico di Flask-SQLAlchemy 3.x)
     fin dal modulo-level 'with app.app_context(): db.create_all()'.
-    Non serve creare l'utente admin: è già stato creato dalla logica di startup.
+    La patch di sicurezza genera una password admin casuale al primo avvio:
+    qui la reimpostiamo a TEST_PASSWORD (valore fisso noto) prima dei test.
     """
     flask_app.config.update({
         'TESTING': True,
         'WTF_CSRF_ENABLED': False,
     })
+    # Reimposta la password admin a un valore noto per i test
+    with flask_app.app_context():
+        admin = LocalUser.query.filter_by(username='admin').first()
+        if admin:
+            admin.set_password(TEST_PASSWORD)
+            db.session.commit()
     yield flask_app
 
 
@@ -47,9 +57,12 @@ def app():
 def client(app):
     """Client di test con sessione autenticata (admin)."""
     with app.test_client() as c:
-        resp = c.post('/login', data={'username': 'admin', 'password': 'admin'},
+        resp = c.post('/login', data={'username': 'admin', 'password': TEST_PASSWORD},
                       follow_redirects=True)
-        assert resp.status_code == 200, "Login iniziale fallito nel fixture"
+        assert resp.status_code == 200, (
+            f"Login iniziale fallito nel fixture (status={resp.status_code}). "
+            "Verificare che l'utente admin esista nel DB in memoria."
+        )
         yield c
 
 
@@ -103,7 +116,7 @@ class TestAuth:
     def test_login_credenziali_corrette(self, app):
         """Login con credenziali valide va a buon fine."""
         with app.test_client() as c:
-            resp = c.post('/login', data={'username': 'admin', 'password': 'admin'},
+            resp = c.post('/login', data={'username': 'admin', 'password': TEST_PASSWORD},
                           follow_redirects=True)
         assert resp.status_code == 200
 
