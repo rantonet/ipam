@@ -14,7 +14,7 @@
 
 ## Download
 
-[![Ultima release](https://img.shields.io/github/v/release/rantonet/ipam?label=ultima%20versione&color=blue)](https://github.com/rantonet/ipam/releases/latest)
+[![Ultima release](https://img.shields.io/badge/ultima%20versione-v1.9.2-blue)](https://github.com/rantonet/ipam/releases/latest)
 
 | Versione | Data | Download |
 |---|---|---|
