@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Accesso negato{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;justify-content:center;min-height:60vh">
+  <div style="text-align:center;max-width:420px">
+    <div style="font-size:4rem;font-weight:700;color:var(--danger);line-height:1">403</div>
+    <div style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:.75rem 0 .4rem">Accesso negato</div>
+    <div style="font-size:.88rem;color:var(--text-muted);margin-bottom:1.5rem">
+      Questa pagina è riservata agli amministratori.
+    </div>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">← Torna alla home</a>
+  </div>
+</div>
+{% endblock %}
