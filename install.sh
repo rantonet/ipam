@@ -178,29 +178,26 @@ echo "  Python usato: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
 # Crea il venv (idempotente: non sovrascrive se già esiste)
 "$PYTHON_BIN" -m venv "${VENV_DIR}"
 
-# Aggiorna pip dentro il venv usando DIRETTAMENTE pypi.org (non il mirror interno,
-# che potrebbe avere solo versioni vecchie di pip e non vedere Flask>=2.3).
-# --no-cache-dir evita metadata stale da precedenti invocazioni con mirror interno.
-echo "  Aggiorno pip via PyPI pubblico..."
-if ! "${VENV_DIR}/bin/pip" install \
-        --index-url https://pypi.org/simple/ \
-        --trusted-host pypi.org \
-        --no-cache-dir --quiet --upgrade pip; then
-    # pypi.org non raggiungibile: prova senza forzare l'index
-    "${VENV_DIR}/bin/pip" install --quiet --upgrade pip || true
-fi
-
+# Aggiorna pip dentro il venv. Usa --no-cache-dir per evitare metadata stale.
+"${VENV_DIR}/bin/pip" install --no-cache-dir --quiet --upgrade pip || true
 PIP_VER=$("${VENV_DIR}/bin/pip" --version 2>/dev/null | awk '{print $2}')
 echo "  pip nel venv: ${PIP_VER}"
 
-# ---- Installa le dipendenze nel venv con fallback a PyPI pubblico ----
+# ---- Installa le dipendenze nel venv ----
 #
-# Strategia in 3 tentativi:
-#   1) mirror interno (configurazione pip di sistema)
-#   2) mirror interno + PyPI pubblico come extra index
-#   3) solo PyPI pubblico (con --no-cache-dir per bypassare cache corrotta)
+# Strategia in 3 tentativi, dal più affidabile al più dipendente dalla rete:
 #
-_pip_install() {
+#   1) Wheel bundlate nello zip (./wheels/) — funziona SEMPRE, offline,
+#      indipendentemente dal mirror aziendale o dalla disponibilità di internet.
+#      I wheel sono pre-scaricati per Python 3.9 / manylinux2014_x86_64.
+#
+#   2) Mirror interno  (configurazione pip di sistema)
+#
+#   3) PyPI pubblico   (fallback se il mirror è incompleto)
+#
+WHEELS_DIR="${SCRIPT_DIR}/wheels"
+
+_pip_install_net() {
     if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
         "${VENV_DIR}/bin/pip" install --no-cache-dir --quiet "$@" \
             -r "${SCRIPT_DIR}/requirements.txt"
@@ -211,31 +208,44 @@ _pip_install() {
     fi
 }
 
-echo "  Tentativo 1: mirror di sistema..."
-if _pip_install 2>/dev/null; then
-    echo "  Dipendenze installate dal mirror di sistema."
-else
-    echo "  Mirror di sistema incompleto — provo con PyPI pubblico come sorgente aggiuntiva..."
-    if _pip_install \
-        --extra-index-url https://pypi.org/simple/ \
-        --trusted-host pypi.org 2>/dev/null; then
-        echo "  Dipendenze installate (mirror interno + PyPI pubblico)."
+if [[ -d "${WHEELS_DIR}" ]] && ls "${WHEELS_DIR}"/*.whl &>/dev/null; then
+    echo "  Tentativo 1: wheel bundlate (offline)..."
+    if "${VENV_DIR}/bin/pip" install \
+            --no-cache-dir --quiet \
+            --no-index \
+            --find-links "${WHEELS_DIR}" \
+            -r "${SCRIPT_DIR}/requirements.txt" 2>/dev/null; then
+        echo "  Dipendenze installate dai wheel bundlati."
     else
-        echo "  Provo solo PyPI pubblico..."
-        if _pip_install \
-            --index-url https://pypi.org/simple/ \
-            --trusted-host pypi.org; then
-            echo "  Dipendenze installate da PyPI pubblico."
+        echo "  Wheel bundlati incompleti — provo via rete..."
+        if _pip_install_net 2>/dev/null; then
+            echo "  Dipendenze installate dal mirror di sistema."
+        elif _pip_install_net \
+                --extra-index-url https://pypi.org/simple/ \
+                --trusted-host pypi.org 2>/dev/null; then
+            echo "  Dipendenze installate (mirror + PyPI pubblico)."
         else
-            echo "" >&2
-            echo "[ERRORE] Impossibile installare le dipendenze Python." >&2
-            echo "         Il mirror interno non ha Flask>=2.3 e il server" >&2
-            echo "         non riesce a raggiungere https://pypi.org/simple/" >&2
-            echo "         Soluzioni:" >&2
-            echo "           a) Aggiungere Flask 2.3+ al mirror PyPI interno" >&2
-            echo "           b) Abilitare accesso a pypi.org (anche solo HTTPS porta 443)" >&2
-            exit 1
+            _pip_install_net \
+                --index-url https://pypi.org/simple/ \
+                --trusted-host pypi.org \
+            && echo "  Dipendenze installate da PyPI pubblico." \
+            || { echo "[ERRORE] Installazione dipendenze fallita." >&2; exit 1; }
         fi
+    fi
+else
+    echo "  Tentativo via rete (nessun wheel bundlato trovato)..."
+    if _pip_install_net 2>/dev/null; then
+        echo "  Dipendenze installate dal mirror di sistema."
+    elif _pip_install_net \
+            --extra-index-url https://pypi.org/simple/ \
+            --trusted-host pypi.org 2>/dev/null; then
+        echo "  Dipendenze installate (mirror + PyPI pubblico)."
+    else
+        _pip_install_net \
+            --index-url https://pypi.org/simple/ \
+            --trusted-host pypi.org \
+        && echo "  Dipendenze installate da PyPI pubblico." \
+        || { echo "[ERRORE] Installazione dipendenze fallita." >&2; exit 1; }
     fi
 fi
 
