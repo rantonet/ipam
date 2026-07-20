@@ -210,11 +210,14 @@ _pip_install_net() {
 
 if [[ -d "${WHEELS_DIR}" ]] && ls "${WHEELS_DIR}"/*.whl &>/dev/null; then
     echo "  Tentativo 1: wheel bundlate (offline)..."
+    # Usa lista esplicita per escludere pytest (non necessario in produzione
+    # e non incluso nei wheel bundlati).
     if "${VENV_DIR}/bin/pip" install \
             --no-cache-dir --quiet \
             --no-index \
             --find-links "${WHEELS_DIR}" \
-            -r "${SCRIPT_DIR}/requirements.txt" 2>/dev/null; then
+            flask flask-sqlalchemy flask-login werkzeug gunicorn \
+            dnspython apscheduler ldap3 2>/dev/null; then
         echo "  Dipendenze installate dai wheel bundlati."
     else
         echo "  Wheel bundlati incompleti — provo via rete..."
