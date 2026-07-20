@@ -240,6 +240,12 @@
       <span id="ldap_groups_label">Gruppi autorizzati</span>
       <span style="font-size:.75rem;color:var(--text-muted)" id="ldap_groups_hint">(CN del gruppo; separati da virgola; vuoto = tutti)</span>
       <input type="text" id="ldap_allowed_groups" class="form-control"
+             placeholder="GRP-IPAM-Users" style="font-size:.85rem">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;color:var(--text-muted)">
+      Gruppi admin AD
+      <span style="font-size:.75rem;color:var(--text-muted)">(CN del gruppo; separati da virgola; chi appartiene a questi gruppi ottiene i privilegi di amministratore)</span>
+      <input type="text" id="ldap_admin_groups" class="form-control"
              placeholder="GRP-IPAM-Admins" style="font-size:.85rem">
     </label>
   </div>
@@ -1239,6 +1245,7 @@ function loadLdap() {
       document.getElementById('ldap_bind_password').value    = d.ldap_bind_password || '';
       document.getElementById('ldap_user_attr').value        = d.ldap_user_attr     || '';
       document.getElementById('ldap_allowed_groups').value   = d.ldap_allowed_groups || '';
+      document.getElementById('ldap_admin_groups').value     = d.ldap_admin_groups   || '';
       var stype = d.ldap_server_type || 'ad';
       document.getElementById(stype === 'openldap' ? 'ldap_type_openldap' : 'ldap_type_ad').checked = true;
       updateLdapHints();
@@ -1256,6 +1263,7 @@ function saveLdap() {
     ldap_bind_password:  document.getElementById('ldap_bind_password').value,
     ldap_user_attr:      document.getElementById('ldap_user_attr').value.trim(),
     ldap_allowed_groups: document.getElementById('ldap_allowed_groups').value.trim(),
+    ldap_admin_groups:   document.getElementById('ldap_admin_groups').value.trim(),
   };
   fetch('/ipam/api/settings/ldap', {
     method: 'PUT',
