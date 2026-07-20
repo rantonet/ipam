@@ -110,6 +110,11 @@ app.config['SECRET_KEY'] = _load_or_generate_secret_key()
 _default_db_uri = 'sqlite:///' + os.path.join(BASE_DIR, 'instance', 'ipam.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('IPAM_DATABASE_URI', _default_db_uri)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# SQLite: timeout 30s invece di fallire subito; pool_pre_ping verifica la connessione
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'connect_args': {'timeout': 30},
+    'pool_pre_ping': True,
+}
 
 #  Cookie di sessione: httponly sempre; secure solo in produzione HTTPS.
 #  Impostare IPAM_COOKIE_SECURE=1 quando il frontend è servito via HTTPS
@@ -119,6 +124,22 @@ app.config['SESSION_COOKIE_SECURE']   = os.environ.get('IPAM_COOKIE_SECURE', '0'
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 db = SQLAlchemy(app)
+
+# ── WAL mode per SQLite: riduce drasticamente i "database is locked"
+# con scanner multi-thread. busy_timeout ridondante con connect_args ma
+# garantisce copertura su connessioni raw sqlite3 aperte separatamente.
+import sqlite3 as _sqlite3
+from sqlalchemy import event as _sqla_event
+from sqlalchemy.engine import Engine as _Engine
+
+@_sqla_event.listens_for(_Engine, "connect")
+def _set_sqlite_wal(dbapi_conn, _rec):
+    if isinstance(dbapi_conn, _sqlite3.Connection):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.close()
 
 login_manager = LoginManager(app)
 login_manager.login_view = 'auth_login'
