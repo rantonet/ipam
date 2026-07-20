@@ -409,17 +409,33 @@ if [[ "$FAMILY" == "redhat" ]]; then
                 "${INSTALL_DIR}/instance(/.*)?" 2>/dev/null \
                 || semanage fcontext -m -t httpd_sys_rw_content_t \
                 "${INSTALL_DIR}/instance(/.*)?" 2>/dev/null || true
-            # Binari venv (gunicorn, python3): devono essere eseguibili
+            # Binari venv (gunicorn, python3 symlink): devono essere eseguibili
             semanage fcontext -a -t bin_t \
                 "${INSTALL_DIR}/venv/bin(/.*)?" 2>/dev/null \
                 || semanage fcontext -m -t bin_t \
                 "${INSTALL_DIR}/venv/bin(/.*)?" 2>/dev/null || true
             restorecon -Rv "${INSTALL_DIR}" >/dev/null 2>&1
+
+            # CRITICO — pyenv Python: venv/bin/python3 è un symlink a
+            # /root/.pyenv/versions/X.Y.Z/bin/python3 che ha contesto
+            # user_home_t. SELinux impedisce ai servizi di sistema di
+            # eseguire binari con quel contesto → status=203/EXEC.
+            # Soluzione: impostare bin_t sul Python reale di pyenv.
+            PYENV_ROOT_DIR=$(pyenv root 2>/dev/null || echo "${HOME}/.pyenv")
+            if [[ -d "${PYENV_ROOT_DIR}/versions" ]]; then
+                chcon -R -t bin_t "${PYENV_ROOT_DIR}/versions/" 2>/dev/null || true
+                echo "  SELinux: bin_t applicato su ${PYENV_ROOT_DIR}/versions/ (Python pyenv)."
+            fi
+
             echo "  SELinux: contesti applicati (bin_t su venv/bin, rw su instance)."
         else
             # Fallback con chcon (non persistente ma funziona subito)
             chcon -R -t bin_t "${INSTALL_DIR}/venv/bin/" 2>/dev/null || true
             chcon -R -t httpd_sys_rw_content_t "${INSTALL_DIR}/instance/" 2>/dev/null || true
+            # Stesso fix pyenv via chcon
+            PYENV_ROOT_DIR=$(pyenv root 2>/dev/null || echo "${HOME}/.pyenv")
+            [[ -d "${PYENV_ROOT_DIR}/versions" ]] && \
+                chcon -R -t bin_t "${PYENV_ROOT_DIR}/versions/" 2>/dev/null || true
             echo "  [WARN] semanage non trovato — usato chcon (non persistente)."
             echo "         Installa policycoreutils-python-utils per la configurazione permanente."
         fi
