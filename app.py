@@ -607,7 +607,8 @@ def _load_user(user_id):
     elif user_id.startswith('ldap:'):
         info = session.get('_ldap_user')
         if info and info.get('id') == user_id:
-            return AuthUser(user_id, info['username'], info['display_name'], False, 'ldap')
+            return AuthUser(user_id, info['username'], info['display_name'],
+                            bool(info.get('is_admin', False)), 'ldap')
     return None
 
 
@@ -761,14 +762,47 @@ def _ldap_authenticate(username, password):
                               username, ip)
             return None
 
-        _auth_log.info('LDAP_OK    | %-20s | ldap | %s | %s', username, ip, display_name)
+        # ── Verifica gruppi admin ─────────────────────────────────────
+        admin_groups = [g.strip() for g in _cfg_get('ldap_admin_groups', '').split(',') if g.strip()]
+        is_admin = False
+        if admin_groups:
+            admin_low = [ag.lower() for ag in admin_groups]
+            if server_type == 'ad':
+                member_of_all = [str(g) for g in entry.memberOf] if hasattr(entry, 'memberOf') and entry.memberOf else []
+                direct_cns_all = [_dn_to_cn(g).lower() for g in member_of_all]
+                if any(al in direct_cns_all for al in admin_low):
+                    is_admin = True
+                else:
+                    try:
+                        conn.search(base_dn,
+                                    '(&(objectClass=group)(member:1.2.840.113556.1.4.1941:={}))'.format(user_dn),
+                                    search_scope=SUBTREE, attributes=['cn'])
+                        nested_admin = [str(e.cn).lower() for e in conn.entries if e.cn]
+                        if any(al in nested_admin for al in admin_low):
+                            is_admin = True
+                    except Exception:
+                        pass
+            else:
+                for grp in admin_groups:
+                    filt = ('(&(|(objectClass=posixGroup)(objectClass=groupOfNames)'
+                            '(objectClass=groupOfUniqueNames))(cn={})'
+                            '(|(memberUid={})(member={})(uniqueMember={})))').format(
+                                grp, username, user_dn, user_dn)
+                    conn.search(base_dn, filt, search_scope=SUBTREE, attributes=['cn'])
+                    if conn.entries:
+                        is_admin = True
+                        break
+
+        _auth_log.info('LDAP_OK    | %-20s | ldap | %s | %s%s', username, ip, display_name,
+                       ' [ADMIN]' if is_admin else '')
         user_id = 'ldap:' + username
         session['_ldap_user'] = {
             'id':           user_id,
             'username':     username,
             'display_name': display_name,
+            'is_admin':     is_admin,
         }
-        return AuthUser(user_id, username, display_name, False, 'ldap')
+        return AuthUser(user_id, username, display_name, is_admin, 'ldap')
 
     except Exception as e:
         _auth_log.warning('LDAP_ERR   | %-20s | ldap | %s | %s', username, ip, e)
@@ -940,7 +974,7 @@ def api_local_users_delete(uid):
 
 _LDAP_KEYS = ['ldap_enabled', 'ldap_server_type', 'ldap_server', 'ldap_base_dn',
                'ldap_bind_dn', 'ldap_bind_password',
-               'ldap_user_attr', 'ldap_allowed_groups']
+               'ldap_user_attr', 'ldap_allowed_groups', 'ldap_admin_groups']
 
 _SNMP_KEYS = ['snmp_enabled', 'snmp_community', 'snmp_version',
               'snmp_routers', 'snmp_switches']
