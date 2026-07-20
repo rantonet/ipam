@@ -124,24 +124,53 @@ echo "[2/6] Creo virtualenv e installo dipendenze Python..."
 VENV_DIR="${INSTALL_DIR}/venv"
 
 # ---- Scegli il miglior Python disponibile (>=3.8 richiesto da Flask>=2.3) ----
+_py_ver_num() { "$1" -c "import sys; print(sys.version_info.major*100+sys.version_info.minor)" 2>/dev/null || echo 0; }
+
 PYTHON_BIN=""
-for candidate in python3.12 python3.11 python3.10 python3.9 python3.8; do
-    if command -v "$candidate" &>/dev/null; then
-        PYTHON_BIN=$(command -v "$candidate")
+
+# 1) Cerca nei PATH standard
+for candidate in python3.13 python3.12 python3.11 python3.10 python3.9 python3.8; do
+    bin=$(command -v "$candidate" 2>/dev/null || true)
+    if [[ -n "$bin" ]] && [[ $(_py_ver_num "$bin") -ge 308 ]]; then
+        PYTHON_BIN="$bin"
         break
     fi
 done
-# Fallback a python3 generico
+
+# 2) Cerca nelle versioni installate da pyenv
+if [[ -z "$PYTHON_BIN" ]] && command -v pyenv &>/dev/null; then
+    PYENV_ROOT=$(pyenv root 2>/dev/null || echo "${HOME}/.pyenv")
+    if [[ -d "${PYENV_ROOT}/versions" ]]; then
+        # Ordina le versioni in modo decrescente (preferiamo la più recente)
+        while IFS= read -r ver_dir; do
+            py_bin="${ver_dir}/bin/python3"
+            [[ -x "$py_bin" ]] || continue
+            if [[ $(_py_ver_num "$py_bin") -ge 308 ]]; then
+                PYTHON_BIN="$py_bin"
+                break
+            fi
+        done < <(ls -d "${PYENV_ROOT}/versions"/3.* 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n -r)
+    fi
+fi
+
+# 3) Fallback a python3 generico (potrebbe essere <3.8, verrà bloccato sotto)
 if [[ -z "$PYTHON_BIN" ]]; then
-    PYTHON_BIN=$(command -v python3)
+    PYTHON_BIN=$(command -v python3 || true)
 fi
 
 # Controlla versione minima
-PY_VER=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.major*100+sys.version_info.minor)")
+if [[ -z "$PYTHON_BIN" ]]; then
+    echo "[ERRORE] Nessun interprete Python trovato." >&2; exit 1
+fi
+PY_VER=$(_py_ver_num "$PYTHON_BIN")
 if [[ "$PY_VER" -lt 308 ]]; then
     echo "" >&2
-    echo "[ERRORE] Python 3.8+ richiesto (Flask>=2.3). Trovato: $("$PYTHON_BIN" --version)." >&2
-    echo "         Su CentOS 7: yum install -y python39  poi riesegui install.sh" >&2
+    echo "[ERRORE] Python 3.8+ richiesto (Flask>=2.3). Trovato: $("$PYTHON_BIN" --version 2>&1)." >&2
+    if command -v pyenv &>/dev/null; then
+        echo "         pyenv rilevato. Installa con: pyenv install 3.9.25 && pyenv global 3.9.25" >&2
+    else
+        echo "         Su CentOS 7: yum install -y python39  oppure installa pyenv" >&2
+    fi
     exit 1
 fi
 echo "  Python usato: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
