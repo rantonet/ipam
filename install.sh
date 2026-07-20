@@ -105,8 +105,9 @@ elif [[ "$FAMILY" == "redhat" ]]; then
         else
             # CentOS 7: Python 3.6 di sistema non supporta Flask>=2.3.
             # Installa python39 da EPEL (pacchetto: python39, python39-pip).
+            # mod_ssl installato qui (Step 1) così Apache funziona anche se Step 2 fallisce.
             echo "  CentOS 7 rilevato: installo python39 da EPEL (richiesto da Flask>=2.3)..."
-            $PKG_MGR install -y httpd python3 python3-pip python36-virtualenv
+            $PKG_MGR install -y httpd mod_ssl python3 python3-pip python36-virtualenv
             $PKG_MGR install -y python39 python39-pip 2>/dev/null || \
                 $PKG_MGR install -y python3.9 2>/dev/null || true
         fi
@@ -175,7 +176,17 @@ if [[ "$PY_VER" -lt 308 ]]; then
 fi
 echo "  Python usato: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
 
-# Crea il venv (idempotente: non sovrascrive se già esiste)
+# Sanity check: se il venv esiste ma è incompleto (pip assente o python non funziona)
+# lo ricreiamo con --clear per evitare stati inconsistenti da installazioni precedenti fallite.
+if [[ -d "${VENV_DIR}" ]]; then
+    if ! "${VENV_DIR}/bin/python3" -c "import sys" &>/dev/null \
+        || [[ ! -f "${VENV_DIR}/bin/pip" ]]; then
+        echo "  venv incompleto o corrotto — ricreazione in corso..."
+        rm -rf "${VENV_DIR}"
+    fi
+fi
+
+# Crea il venv (idempotente: non sovrascrive se già esiste e funziona)
 "$PYTHON_BIN" -m venv "${VENV_DIR}"
 
 # Aggiorna pip dentro il venv. Usa --no-cache-dir per evitare metadata stale.
@@ -553,12 +564,15 @@ if [[ "$FAMILY" == "debian" ]]; then
     fi
 
 elif [[ "$FAMILY" == "redhat" ]]; then
-    # Installa mod_ssl se assente
+    # mod_ssl già installato in Step 1; doppio check per sicurezza
     if ! rpm -q mod_ssl &>/dev/null; then
-        yum install -y mod_ssl 2>/dev/null || dnf install -y mod_ssl 2>/dev/null || true
+        echo "  [WARN] mod_ssl non trovato — tentativo installazione..."
+        $PKG_MGR install -y mod_ssl 2>/dev/null || true
     fi
-    systemctl enable --now httpd
-    systemctl reload httpd
+    systemctl enable httpd
+    # restart (non reload) dopo aver scritto ipam.conf con SSLEngine,
+    # per caricare correttamente mod_ssl se appena installato
+    systemctl restart httpd
     if systemctl is-active --quiet firewalld; then
         firewall-cmd --permanent --add-service=http
         firewall-cmd --permanent --add-service=https
