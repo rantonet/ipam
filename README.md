@@ -18,7 +18,7 @@
 
 | Versione | Data | Download |
 |---|---|---|
-| **v1.9.2** | 2026-06-16 | [ipam_v1.9.2_20260616.zip](https://github.com/rantonet/ipam/releases/download/v1.9.2/ipam_v1.9.2_20260616.zip) |
+| **v1.9.2** | 2026-07-20 | [ipam_v1.9.2_20260720.zip](https://github.com/rantonet/ipam/releases/download/v1.9.2/ipam_v1.9.2_20260720.zip) |
 
 Tutte le versioni sono disponibili nella pagina [**Releases**](https://github.com/rantonet/ipam/releases).
 
@@ -128,8 +128,8 @@ Le dipendenze Python vengono installate automaticamente dallo script di installa
 
 ```bash
 # 1. Scarica e decomprimi il pacchetto (crea automaticamente la cartella deploy_ipam/)
-wget https://github.com/rantonet/ipam/releases/download/v1.9.2/ipam_v1.9.2_20260616.zip
-unzip ipam_v1.9.2_20260616.zip
+wget https://github.com/rantonet/ipam/releases/download/v1.9.2/ipam_v1.9.2_20260720.zip
+unzip ipam_v1.9.2_20260720.zip
 cd deploy_ipam
 
 # 2. Esegui lo script di installazione (richiede sudo)
@@ -201,7 +201,7 @@ WantedBy=multi-user.target
 
 ```bash
 # 1. Scarica il nuovo pacchetto e decomprimi
-unzip ipam_v1.9.2_20260616.zip -d /tmp/ipam_update
+unzip ipam_v1.9.2_20260720.zip -d /tmp/ipam_update
 cd /tmp/ipam_update
 
 # 2. Esegui lo script di aggiornamento
