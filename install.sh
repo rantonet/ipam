@@ -179,15 +179,55 @@ echo "  Python usato: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
 "$PYTHON_BIN" -m venv "${VENV_DIR}"
 
 # Aggiorna pip dentro il venv (necessario su CentOS 7 dove il pip bundled è vecchio)
-"${VENV_DIR}/bin/pip" install --quiet --upgrade pip
+# Nota: --upgrade prova prima il mirror locale, poi (se non basta) pypi.org
+"${VENV_DIR}/bin/pip" install \
+    --extra-index-url https://pypi.org/simple/ \
+    --trusted-host pypi.org \
+    --quiet --upgrade pip
 
-# Installa le dipendenze nel venv
-if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
-    "${VENV_DIR}/bin/pip" install --quiet -r "${SCRIPT_DIR}/requirements.txt"
+# ---- Installa le dipendenze nel venv con fallback a PyPI pubblico ----
+#
+# Strategia in 3 tentativi:
+#   1) mirror interno (configurazione pip di sistema)
+#   2) mirror interno + PyPI pubblico come extra index
+#   3) solo PyPI pubblico
+#
+_pip_install() {
+    if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
+        "${VENV_DIR}/bin/pip" install --quiet "$@" -r "${SCRIPT_DIR}/requirements.txt"
+    else
+        "${VENV_DIR}/bin/pip" install --quiet "$@" \
+            flask flask-sqlalchemy flask-login werkzeug gunicorn \
+            dnspython apscheduler ldap3
+    fi
+}
+
+echo "  Tentativo 1: mirror di sistema..."
+if _pip_install 2>/dev/null; then
+    echo "  Dipendenze installate dal mirror di sistema."
 else
-    "${VENV_DIR}/bin/pip" install --quiet \
-        flask flask-sqlalchemy flask-login werkzeug gunicorn \
-        dnspython apscheduler ldap3
+    echo "  Mirror di sistema incompleto — provo con PyPI pubblico come sorgente aggiuntiva..."
+    if _pip_install \
+        --extra-index-url https://pypi.org/simple/ \
+        --trusted-host pypi.org 2>/dev/null; then
+        echo "  Dipendenze installate (mirror interno + PyPI pubblico)."
+    else
+        echo "  Provo solo PyPI pubblico..."
+        if _pip_install \
+            --index-url https://pypi.org/simple/ \
+            --trusted-host pypi.org; then
+            echo "  Dipendenze installate da PyPI pubblico."
+        else
+            echo "" >&2
+            echo "[ERRORE] Impossibile installare le dipendenze Python." >&2
+            echo "         Il mirror interno non ha Flask>=2.3 e il server" >&2
+            echo "         non riesce a raggiungere https://pypi.org/simple/" >&2
+            echo "         Soluzioni:" >&2
+            echo "           a) Aggiungere Flask 2.3+ al mirror PyPI interno" >&2
+            echo "           b) Abilitare accesso a pypi.org (anche solo HTTPS porta 443)" >&2
+            exit 1
+        fi
+    fi
 fi
 
 echo "  Virtualenv: ${VENV_DIR}"
