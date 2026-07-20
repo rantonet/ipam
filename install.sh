@@ -476,15 +476,33 @@ echo ""
 echo "[6/6] Configuro Gunicorn (systemd) e Apache (HTTPS)..."
 
 VENV_DIR="${INSTALL_DIR}/venv"
-GUNICORN_BIN="${VENV_DIR}/bin/gunicorn"
-PYTHON_BIN="${VENV_DIR}/bin/python3"
 SERVER_IP=$(hostname -I | awk '{print $1}')
 SERVER_FQDN=$(hostname -f 2>/dev/null || echo "${SERVER_IP}")
 
 TLS_KEY="/etc/ssl/private/ipam.key"
 TLS_CERT="/etc/ssl/certs/ipam.crt"
 
+# Risolvi il path REALE del Python (segue tutti i symlink).
+# Su pyenv, venv/bin/python3 punta a /root/.pyenv/versions/X.Y.Z/bin/python3
+# che ha contesto SELinux user_home_t → non eseguibile da servizi di sistema.
+# Usare il path reale + chcon bin_t risolve il problema senza dipendere
+# dallo script gunicorn (che ha uno shebang con lo stesso symlink problematico).
+REAL_PYTHON=$(readlink -f "${VENV_DIR}/bin/python3" 2>/dev/null \
+              || "${VENV_DIR}/bin/python3" -c "import sys; print(sys.executable)")
+PY_MINOR=$("${REAL_PYTHON}" -c \
+    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null \
+    || echo "3.9")
+VENV_SITE="${VENV_DIR}/lib/python${PY_MINOR}/site-packages"
+echo "  Python reale: ${REAL_PYTHON} (${PY_MINOR})"
+echo "  site-packages: ${VENV_SITE}"
+
+# Imposta bin_t sul binary reale così SELinux consente l'esecuzione da systemd
+chcon -t bin_t "${REAL_PYTHON}" 2>/dev/null || true
+
 # -- Servizio systemd -------------------------------------------
+# ExecStart usa il Python REALE con -m gunicorn anziché lo script gunicorn,
+# eliminando la catena shebang→symlink→pyenv che SELinux blocca (203/EXEC).
+# PYTHONPATH fornisce a Python il percorso dei pacchetti installati nel venv.
 cat > /etc/systemd/system/ipam.service << SVCEOF
 [Unit]
 Description=IPAM Gunicorn daemon
@@ -495,9 +513,11 @@ User=root
 Group=root
 WorkingDirectory=${INSTALL_DIR}
 Environment="PATH=${INSTALL_DIR}/venv/bin:/usr/local/bin:/usr/bin"
+Environment="PYTHONPATH=${VENV_SITE}"
+Environment="VIRTUAL_ENV=${VENV_DIR}"
 Environment="IPAM_SEED=0"
 Environment="IPAM_COOKIE_SECURE=1"
-ExecStart=${GUNICORN_BIN} --bind 127.0.0.1:8000 --workers 1 --timeout 120 wsgi_gunicorn:application
+ExecStart=${REAL_PYTHON} -m gunicorn --bind 127.0.0.1:8000 --workers 1 --timeout 120 wsgi_gunicorn:application
 Restart=on-failure
 RestartSec=5s
 
