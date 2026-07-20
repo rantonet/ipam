@@ -183,12 +183,18 @@ if [[ "$PY_VER" -lt 308 ]]; then
 fi
 echo "  Python usato: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
 
-# Sanity check: se il venv esiste ma è incompleto (pip assente o python non funziona)
-# lo ricreiamo con --clear per evitare stati inconsistenti da installazioni precedenti fallite.
+# Sanity check: elimina il venv se:
+#   a) python3 non funziona o pip è assente
+#   b) il venv usa Python < 3.8 (incompatibile con Flask>=2.3)
+#      — es. un vecchio venv creato con il Python 3.6 di sistema su CentOS 7
 if [[ -d "${VENV_DIR}" ]]; then
-    if ! "${VENV_DIR}/bin/python3" -c "import sys" &>/dev/null \
-        || [[ ! -f "${VENV_DIR}/bin/pip" ]]; then
-        echo "  venv incompleto o corrotto — ricreazione in corso..."
+    _VENV_PY_VER=$("${VENV_DIR}/bin/python3" -c \
+        "import sys; print(sys.version_info.major*100+sys.version_info.minor)" 2>/dev/null || echo 0)
+    if [[ ! -f "${VENV_DIR}/bin/pip" ]] \
+        || ! "${VENV_DIR}/bin/python3" -c "import sys" &>/dev/null \
+        || [[ "${_VENV_PY_VER}" -lt 308 ]]; then
+        _VENV_PY_LABEL=$("${VENV_DIR}/bin/python3" --version 2>&1 || echo "sconosciuto")
+        echo "  venv incompatibile (${_VENV_PY_LABEL} — richiesto >=3.8) — ricreazione..."
         rm -rf "${VENV_DIR}"
     fi
 fi
