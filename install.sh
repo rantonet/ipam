@@ -178,25 +178,34 @@ echo "  Python usato: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
 # Crea il venv (idempotente: non sovrascrive se già esiste)
 "$PYTHON_BIN" -m venv "${VENV_DIR}"
 
-# Aggiorna pip dentro il venv (necessario su CentOS 7 dove il pip bundled è vecchio)
-# Nota: --upgrade prova prima il mirror locale, poi (se non basta) pypi.org
-"${VENV_DIR}/bin/pip" install \
-    --extra-index-url https://pypi.org/simple/ \
-    --trusted-host pypi.org \
-    --quiet --upgrade pip
+# Aggiorna pip dentro il venv usando DIRETTAMENTE pypi.org (non il mirror interno,
+# che potrebbe avere solo versioni vecchie di pip e non vedere Flask>=2.3).
+# --no-cache-dir evita metadata stale da precedenti invocazioni con mirror interno.
+echo "  Aggiorno pip via PyPI pubblico..."
+if ! "${VENV_DIR}/bin/pip" install \
+        --index-url https://pypi.org/simple/ \
+        --trusted-host pypi.org \
+        --no-cache-dir --quiet --upgrade pip; then
+    # pypi.org non raggiungibile: prova senza forzare l'index
+    "${VENV_DIR}/bin/pip" install --quiet --upgrade pip || true
+fi
+
+PIP_VER=$("${VENV_DIR}/bin/pip" --version 2>/dev/null | awk '{print $2}')
+echo "  pip nel venv: ${PIP_VER}"
 
 # ---- Installa le dipendenze nel venv con fallback a PyPI pubblico ----
 #
 # Strategia in 3 tentativi:
 #   1) mirror interno (configurazione pip di sistema)
 #   2) mirror interno + PyPI pubblico come extra index
-#   3) solo PyPI pubblico
+#   3) solo PyPI pubblico (con --no-cache-dir per bypassare cache corrotta)
 #
 _pip_install() {
     if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
-        "${VENV_DIR}/bin/pip" install --quiet "$@" -r "${SCRIPT_DIR}/requirements.txt"
+        "${VENV_DIR}/bin/pip" install --no-cache-dir --quiet "$@" \
+            -r "${SCRIPT_DIR}/requirements.txt"
     else
-        "${VENV_DIR}/bin/pip" install --quiet "$@" \
+        "${VENV_DIR}/bin/pip" install --no-cache-dir --quiet "$@" \
             flask flask-sqlalchemy flask-login werkzeug gunicorn \
             dnspython apscheduler ldap3
     fi
