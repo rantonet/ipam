@@ -101,8 +101,15 @@ elif [[ "$FAMILY" == "redhat" ]]; then
             dnf config-manager --set-enabled powertools 2>/dev/null \
                 || dnf config-manager --set-enabled crb 2>/dev/null \
                 || true
+            $PKG_MGR install -y httpd python3 python3-pip python3-virtualenv
+        else
+            # CentOS 7: Python 3.6 di sistema non supporta Flask>=2.3.
+            # Installa python39 da EPEL (pacchetto: python39, python39-pip).
+            echo "  CentOS 7 rilevato: installo python39 da EPEL (richiesto da Flask>=2.3)..."
+            $PKG_MGR install -y httpd python3 python3-pip python36-virtualenv
+            $PKG_MGR install -y python39 python39-pip 2>/dev/null || \
+                $PKG_MGR install -y python3.9 2>/dev/null || true
         fi
-        $PKG_MGR install -y httpd python3 python3-pip python3-virtualenv
     fi
 fi
 
@@ -116,8 +123,34 @@ echo "[2/6] Creo virtualenv e installo dipendenze Python..."
 
 VENV_DIR="${INSTALL_DIR}/venv"
 
+# ---- Scegli il miglior Python disponibile (>=3.8 richiesto da Flask>=2.3) ----
+PYTHON_BIN=""
+for candidate in python3.12 python3.11 python3.10 python3.9 python3.8; do
+    if command -v "$candidate" &>/dev/null; then
+        PYTHON_BIN=$(command -v "$candidate")
+        break
+    fi
+done
+# Fallback a python3 generico
+if [[ -z "$PYTHON_BIN" ]]; then
+    PYTHON_BIN=$(command -v python3)
+fi
+
+# Controlla versione minima
+PY_VER=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.major*100+sys.version_info.minor)")
+if [[ "$PY_VER" -lt 308 ]]; then
+    echo "" >&2
+    echo "[ERRORE] Python 3.8+ richiesto (Flask>=2.3). Trovato: $("$PYTHON_BIN" --version)." >&2
+    echo "         Su CentOS 7: yum install -y python39  poi riesegui install.sh" >&2
+    exit 1
+fi
+echo "  Python usato: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
+
 # Crea il venv (idempotente: non sovrascrive se già esiste)
-python3 -m venv "${VENV_DIR}"
+"$PYTHON_BIN" -m venv "${VENV_DIR}"
+
+# Aggiorna pip dentro il venv (necessario su CentOS 7 dove il pip bundled è vecchio)
+"${VENV_DIR}/bin/pip" install --quiet --upgrade pip
 
 # Installa le dipendenze nel venv
 if [[ -f "${SCRIPT_DIR}/requirements.txt" ]]; then
