@@ -656,19 +656,10 @@ def _dn_to_cn(dn):
 
 
 def _ldap_make_server(server_url):
-    """
-    Crea un oggetto ldap3.Server SOLO per URL ldaps://.
-    Solleva ValueError per qualsiasi schema non cifrato (ldap://) per
-    impedire che bind e password utente transitino in chiaro.
-    """
+    """Crea un oggetto ldap3.Server per ldap:// o ldaps://."""
     from ldap3 import Server, ALL
-    if not server_url.lower().startswith('ldaps://'):
-        raise ValueError(
-            'Trasporto LDAP in chiaro non consentito. '
-            'Configurare il server con schema ldaps:// (es. ldaps://dc01.example.loc). '
-            'Le connessioni ldap:// espongono credenziali e password in chiaro sulla rete.'
-        )
-    return Server(server_url, get_info=ALL, use_ssl=True, connect_timeout=5)
+    use_ssl = server_url.lower().startswith('ldaps://')
+    return Server(server_url, get_info=ALL, use_ssl=use_ssl, connect_timeout=5)
 
 
 def _ldap_authenticate(username, password):
@@ -687,11 +678,7 @@ def _ldap_authenticate(username, password):
         if not server_url or not base_dn:
             return None
 
-        try:
-            srv = _ldap_make_server(server_url)
-        except ValueError as e:
-            _auth_log.error('LDAP_BLOCKED | %-20s | ldap | %s | %s', username, ip, e)
-            return None
+        srv = _ldap_make_server(server_url)
 
         try:
             if bind_dn:
@@ -969,14 +956,6 @@ def api_ldap_get():
 @_admin_required
 def api_ldap_save():
     data = request.get_json() or {}
-    server_url = (data.get('ldap_server') or '').strip()
-    if server_url and not server_url.lower().startswith('ldaps://'):
-        return jsonify({
-            'ok': False,
-            'error': 'Server LDAP non valido: usare ldaps:// per garantire la cifratura '
-                     'delle credenziali in transito (es. ldaps://dc01.example.loc). '
-                     'Le connessioni ldap:// non sono consentite.'
-        }), 400
     for k in _LDAP_KEYS:
         if k in data:
             _cfg_set(k, data[k] or '')
@@ -1003,10 +982,7 @@ def api_ldap_test():
         if not server_url or not base_dn:
             return jsonify({'ok': False, 'detail': 'Server LDAP e Base DN obbligatori'}), 400
 
-        try:
-            srv = _ldap_make_server(server_url)
-        except ValueError as e:
-            return jsonify({'ok': False, 'detail': str(e)}), 400
+        srv = _ldap_make_server(server_url)
 
         try:
             if bind_dn:
