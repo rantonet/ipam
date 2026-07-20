@@ -470,7 +470,14 @@ def scan_subnet(network_id, app_context=None):
 
                 except Exception as e:
                     log.warning(f"Errore DB per {ip_str}: {e}")
-                    db.session.rollback()
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    try:
+                        db.session.remove()
+                    except Exception:
+                        pass
                     errors += 1
 
         # Commit finale
