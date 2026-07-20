@@ -105,9 +105,16 @@ elif [[ "$FAMILY" == "redhat" ]]; then
         else
             # CentOS 7: Python 3.6 di sistema non supporta Flask>=2.3.
             # Installa python39 da EPEL (pacchetto: python39, python39-pip).
-            # mod_ssl installato qui (Step 1) così Apache funziona anche se Step 2 fallisce.
             echo "  CentOS 7 rilevato: installo python39 da EPEL (richiesto da Flask>=2.3)..."
-            $PKG_MGR install -y httpd mod_ssl python3 python3-pip python36-virtualenv
+            $PKG_MGR install -y httpd python3 python3-pip python36-virtualenv
+            # mod_ssl è opzionale: la sua installazione può fallire se il repo
+            # Comifar ha versioni httpd/mod_ssl non allineate (es. httpd-99 vs mod_ssl-95).
+            # Tentativo 1: installa mod_ssl alla versione standard
+            # Tentativo 2: forza la versione che corrisponde a httpd installato
+            if ! $PKG_MGR install -y mod_ssl 2>/dev/null; then
+                _HTTPD_VER=$(rpm -q httpd --queryformat "%{VERSION}-%{RELEASE}.%{ARCH}" 2>/dev/null || true)
+                $PKG_MGR install -y "mod_ssl-${_HTTPD_VER}" 2>/dev/null || true
+            fi
             $PKG_MGR install -y python39 python39-pip 2>/dev/null || \
                 $PKG_MGR install -y python3.9 2>/dev/null || true
         fi
@@ -458,22 +465,8 @@ PYTHON_BIN="${VENV_DIR}/bin/python3"
 SERVER_IP=$(hostname -I | awk '{print $1}')
 SERVER_FQDN=$(hostname -f 2>/dev/null || echo "${SERVER_IP}")
 
-# -- Certificato TLS: genera autofirmato se non esiste ----------
 TLS_KEY="/etc/ssl/private/ipam.key"
 TLS_CERT="/etc/ssl/certs/ipam.crt"
-if [[ ! -f "$TLS_KEY" ]] || [[ ! -f "$TLS_CERT" ]]; then
-    echo "  Generazione certificato TLS autofirmato (3650 giorni)..."
-    mkdir -p /etc/ssl/private
-    openssl req -x509 -newkey rsa:2048 \
-        -keyout "$TLS_KEY" -out "$TLS_CERT" \
-        -days 3650 -nodes \
-        -subj "/CN=${SERVER_FQDN}/O=IPAM/C=IT" 2>/dev/null
-    chmod 600 "$TLS_KEY"
-    echo "  Certificato autofirmato: ${TLS_CERT}"
-    echo "  [WARN] Sostituire con certificato firmato (Let's Encrypt: certbot --apache)"
-else
-    echo "  Certificato TLS esistente riutilizzato: ${TLS_CERT}"
-fi
 
 # -- Servizio systemd -------------------------------------------
 cat > /etc/systemd/system/ipam.service << SVCEOF
@@ -506,11 +499,38 @@ else
     echo "  [WARN] Gunicorn non avviato. Controlla: journalctl -u ipam -n 30"
 fi
 
-# -- Configurazione Apache: HTTP redirect + HTTPS proxy ---------
-cat > "${CONF_DEST}" << APACHECONF
-# ipam.conf -- generato da install.sh
+# -- Rileva se mod_ssl è disponibile ------------------------------------
+USE_SSL=false
+if rpm -q mod_ssl &>/dev/null || \
+   (python3 -c "import ctypes; ctypes.CDLL('libssl.so.10')" &>/dev/null && \
+    [[ -f "/etc/httpd/modules/mod_ssl.so" ]]); then
+    USE_SSL=true
+elif [[ -f "/etc/httpd/modules/mod_ssl.so" ]]; then
+    USE_SSL=true
+fi
+
+# -- Certificato TLS (solo se mod_ssl disponibile) ----------------------
+if [[ "$USE_SSL" == "true" ]]; then
+    if [[ ! -f "$TLS_KEY" ]] || [[ ! -f "$TLS_CERT" ]]; then
+        echo "  Generazione certificato TLS autofirmato (3650 giorni)..."
+        mkdir -p /etc/ssl/private
+        openssl req -x509 -newkey rsa:2048 \
+            -keyout "$TLS_KEY" -out "$TLS_CERT" \
+            -days 3650 -nodes \
+            -subj "/CN=${SERVER_FQDN}/O=IPAM/C=IT" 2>/dev/null
+        chmod 600 "$TLS_KEY"
+        echo "  Certificato autofirmato: ${TLS_CERT}"
+    else
+        echo "  Certificato TLS esistente riutilizzato: ${TLS_CERT}"
+    fi
+fi
+
+# -- Genera ipam.conf in base alla disponibilità di mod_ssl -------------
+if [[ "$USE_SSL" == "true" ]]; then
+    echo "  mod_ssl disponibile — configurazione HTTPS"
+    cat > "${CONF_DEST}" << APACHECONF
+# ipam.conf -- generato da install.sh (HTTPS)
 # Distro: ${FAMILY} | Dir: ${INSTALL_DIR}
-# SICUREZZA: HTTP redirige su HTTPS; tutto il traffico e' cifrato.
 
 # Redirect HTTP -> HTTPS
 <VirtualHost *:80>
@@ -526,10 +546,8 @@ cat > "${CONF_DEST}" << APACHECONF
     SSLCertificateFile    ${TLS_CERT}
     SSLCertificateKeyFile ${TLS_KEY}
 
-    # Informa Flask dello schema reale (richiesto per SESSION_COOKIE_SECURE)
     RequestHeader set X-Forwarded-Proto "https"
 
-    # File statici serviti direttamente da Apache
     Alias /ipam/static ${INSTALL_DIR}/static
     <Directory ${INSTALL_DIR}/static>
         Options -Indexes
@@ -537,17 +555,51 @@ cat > "${CONF_DEST}" << APACHECONF
         Require all granted
     </Directory>
 
-    # Proteggi il database SQLite
     <Directory ${INSTALL_DIR}/instance>
         Require all denied
     </Directory>
 
-    # Reverse proxy verso Gunicorn (esclude /static)
     ProxyPass        /ipam/static !
     ProxyPass        /ipam  http://127.0.0.1:8000/ipam
     ProxyPassReverse /ipam  http://127.0.0.1:8000/ipam
 </VirtualHost>
 APACHECONF
+else
+    echo "  [WARN] mod_ssl non disponibile — configurazione HTTP (senza TLS)"
+    echo "         Per abilitare HTTPS: yum install mod_ssl && systemctl restart httpd"
+    # Senza SSL, disabilita il cookie secure per evitare problemi di sessione
+    sed -i 's/IPAM_COOKIE_SECURE=1/IPAM_COOKIE_SECURE=0/' \
+        /etc/systemd/system/ipam.service 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    cat > "${CONF_DEST}" << APACHECONF
+# ipam.conf -- generato da install.sh (HTTP - mod_ssl non disponibile)
+# Distro: ${FAMILY} | Dir: ${INSTALL_DIR}
+# NOTA: mod_ssl non installato. Per abilitare HTTPS:
+#   yum install mod_ssl && systemctl restart httpd
+#   Poi riesegui install.sh per aggiornare questa configurazione.
+
+<VirtualHost *:80>
+    ServerName ${SERVER_FQDN}
+
+    RequestHeader set X-Forwarded-Proto "http"
+
+    Alias /ipam/static ${INSTALL_DIR}/static
+    <Directory ${INSTALL_DIR}/static>
+        Options -Indexes
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    <Directory ${INSTALL_DIR}/instance>
+        Require all denied
+    </Directory>
+
+    ProxyPass        /ipam/static !
+    ProxyPass        /ipam  http://127.0.0.1:8000/ipam
+    ProxyPassReverse /ipam  http://127.0.0.1:8000/ipam
+</VirtualHost>
+APACHECONF
+fi
 
 echo "  ipam.conf generato in ${CONF_DEST}"
 
