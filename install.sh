@@ -209,18 +209,50 @@ _pip_install_net() {
 }
 
 if [[ -d "${WHEELS_DIR}" ]] && ls "${WHEELS_DIR}"/*.whl &>/dev/null; then
-    echo "  Tentativo 1: wheel bundlate (offline)..."
-    # Installa TUTTI i .whl con --no-deps in un'unica chiamata.
-    # --no-deps salta il resolver di dipendenze (non necessario: abbiamo tutti i
-    # wheel bundlati). Questo funziona anche con pip 21.x che ha problemi nel
-    # risolvere metadata moderni (SQLAlchemy 2.0, Flask 2.3+) via --no-index.
-    if "${VENV_DIR}/bin/pip" install \
-            --no-cache-dir --quiet \
-            --no-deps \
-            "${WHEELS_DIR}"/*.whl; then
+    echo "  Installazione da wheel bundlate (offline)..."
+
+    # Localizza site-packages del venv
+    SITE_PKG=$("${VENV_DIR}/bin/python3" -c \
+        "import sys; print([p for p in sys.path if 'site-packages' in p][0])" 2>/dev/null \
+        || ls -d "${VENV_DIR}"/lib/python3.*/site-packages 2>/dev/null | head -1)
+
+    # ---- Strategia in 2 fasi ----
+    #
+    # Fase A: wheel PURI (py3-none-any, py2.py3-none-any)
+    #   → pip install --no-deps: gestisce entry_points e scripts (es. gunicorn)
+    #
+    # Fase B: wheel BINARI (cp39-cp39-*, C extension)
+    #   → unzip diretto in site-packages: bypassa il check di piattaforma di pip
+    #     che su pyenv Python non riconosce manylinux2014 anche se il .so
+    #     è compatibile con il glibc 2.17 di CentOS 7.
+    #
+
+    INSTALL_OK=true
+
+    # Fase A: pure-python
+    for whl in "${WHEELS_DIR}"/*.whl; do
+        name=$(basename "$whl")
+        if [[ "$name" == *"-none-any.whl" ]] || [[ "$name" == *"py2.py3"* ]]; then
+            "${VENV_DIR}/bin/pip" install --no-deps --quiet "$whl" 2>/dev/null \
+                || { echo "  [WARN] pip rifiutato: $name — provo unzip"; \
+                     unzip -q -o "$whl" -d "${SITE_PKG}/" 2>/dev/null || INSTALL_OK=false; }
+        fi
+    done
+
+    # Fase B: binary (C extension) — estrazione diretta
+    for whl in "${WHEELS_DIR}"/*.whl; do
+        name=$(basename "$whl")
+        if [[ "$name" != *"-none-any.whl" ]] && [[ "$name" != *"py2.py3"* ]]; then
+            echo "    estraggo: $name"
+            unzip -q -o "$whl" -d "${SITE_PKG}/" 2>/dev/null \
+                || { echo "  [WARN] unzip fallito: $name"; INSTALL_OK=false; }
+        fi
+    done
+
+    if [[ "${INSTALL_OK}" == "true" ]]; then
         echo "  Dipendenze installate dai wheel bundlati."
     else
-        echo "  Wheel bundlati: installazione fallita — provo via rete..."
+        echo "  Wheel bundlati parziali — provo via rete per i pacchetti mancanti..."
         if _pip_install_net 2>/dev/null; then
             echo "  Dipendenze installate dal mirror di sistema."
         elif _pip_install_net \
