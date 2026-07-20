@@ -210,17 +210,17 @@ _pip_install_net() {
 
 if [[ -d "${WHEELS_DIR}" ]] && ls "${WHEELS_DIR}"/*.whl &>/dev/null; then
     echo "  Tentativo 1: wheel bundlate (offline)..."
-    # Usa lista esplicita per escludere pytest (non necessario in produzione
-    # e non incluso nei wheel bundlati).
+    # Installa TUTTI i .whl con --no-deps in un'unica chiamata.
+    # --no-deps salta il resolver di dipendenze (non necessario: abbiamo tutti i
+    # wheel bundlati). Questo funziona anche con pip 21.x che ha problemi nel
+    # risolvere metadata moderni (SQLAlchemy 2.0, Flask 2.3+) via --no-index.
     if "${VENV_DIR}/bin/pip" install \
             --no-cache-dir --quiet \
-            --no-index \
-            --find-links "${WHEELS_DIR}" \
-            flask flask-sqlalchemy flask-login werkzeug gunicorn \
-            dnspython apscheduler ldap3 2>/dev/null; then
+            --no-deps \
+            "${WHEELS_DIR}"/*.whl; then
         echo "  Dipendenze installate dai wheel bundlati."
     else
-        echo "  Wheel bundlati incompleti — provo via rete..."
+        echo "  Wheel bundlati: installazione fallita — provo via rete..."
         if _pip_install_net 2>/dev/null; then
             echo "  Dipendenze installate dal mirror di sistema."
         elif _pip_install_net \
